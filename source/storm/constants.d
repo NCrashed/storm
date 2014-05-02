@@ -277,46 +277,77 @@ enum MPQ_CREATE_ARCHIVE_VMASK  = 0x0F000000;
 enum FLAGS_TO_FORMAT_SHIFT             = 24; 
 
 // Flags for SFileVerifyFile
-enum SFILE_VERIFY_SECTOR_CRC   = 0x00000001; // Verify sector checksum for the file, if available
-enum SFILE_VERIFY_FILE_CRC     = 0x00000002; // Verify file CRC, if available
-enum SFILE_VERIFY_FILE_MD5     = 0x00000004; // Verify file MD5, if available
-enum SFILE_VERIFY_RAW_MD5      = 0x00000008; // Verify raw file MD5, if available
-enum SFILE_VERIFY_ALL          = 0x0000000F; // Verify every checksum possible
+/// Verify sector checksum for the file, if available
+enum SFILE_VERIFY_SECTOR_CRC   = 0x00000001; 
+/// Verify file CRC, if available
+enum SFILE_VERIFY_FILE_CRC     = 0x00000002; 
+/// Verify file MD5, if available
+enum SFILE_VERIFY_FILE_MD5     = 0x00000004; 
+/// Verify raw file MD5, if available
+enum SFILE_VERIFY_RAW_MD5      = 0x00000008; 
+/// Verify every checksum possible
+enum SFILE_VERIFY_ALL          = 0x0000000F; 
 
 // Return values for SFileVerifyFile
-enum VERIFY_OPEN_ERROR             = 0x0001; // Failed to open the file
-enum VERIFY_READ_ERROR             = 0x0002; // Failed to read all data from the file
-enum VERIFY_FILE_HAS_SECTOR_CRC    = 0x0004; // File has sector CRC
-enum VERIFY_FILE_SECTOR_CRC_ERROR  = 0x0008; // Sector CRC check failed
-enum VERIFY_FILE_HAS_CHECKSUM      = 0x0010; // File has CRC32
-enum VERIFY_FILE_CHECKSUM_ERROR    = 0x0020; // CRC32 check failed
-enum VERIFY_FILE_HAS_MD5           = 0x0040; // File has data MD5
-enum VERIFY_FILE_MD5_ERROR         = 0x0080; // MD5 check failed
-enum VERIFY_FILE_HAS_RAW_MD5       = 0x0100; // File has raw data MD5
-enum VERIFY_FILE_RAW_MD5_ERROR     = 0x0200; // Raw MD5 check failed
+/// Failed to open the file
+enum VERIFY_OPEN_ERROR             = 0x0001; 
+/// Failed to read all data from the file
+enum VERIFY_READ_ERROR             = 0x0002; 
+/// File has sector CRC
+enum VERIFY_FILE_HAS_SECTOR_CRC    = 0x0004; 
+/// Sector CRC check failed
+enum VERIFY_FILE_SECTOR_CRC_ERROR  = 0x0008; 
+/// File has CRC32
+enum VERIFY_FILE_HAS_CHECKSUM      = 0x0010; 
+/// CRC32 check failed
+enum VERIFY_FILE_CHECKSUM_ERROR    = 0x0020; 
+/// File has data MD5
+enum VERIFY_FILE_HAS_MD5           = 0x0040; 
+/// MD5 check failed
+enum VERIFY_FILE_MD5_ERROR         = 0x0080; 
+/// File has raw data MD5
+enum VERIFY_FILE_HAS_RAW_MD5       = 0x0100; 
+/// Raw MD5 check failed
+enum VERIFY_FILE_RAW_MD5_ERROR     = 0x0200; 
 enum VERIFY_FILE_ERROR_MASK     = (VERIFY_OPEN_ERROR | VERIFY_READ_ERROR | VERIFY_FILE_SECTOR_CRC_ERROR | VERIFY_FILE_CHECKSUM_ERROR | VERIFY_FILE_MD5_ERROR | VERIFY_FILE_RAW_MD5_ERROR);
 
 // Flags for SFileVerifyRawData (for MPQs version 4.0 or higher)
-enum SFILE_VERIFY_MPQ_HEADER       = 0x0001; // Verify raw MPQ header
-enum SFILE_VERIFY_HET_TABLE        = 0x0002; // Verify raw data of the HET table
-enum SFILE_VERIFY_BET_TABLE        = 0x0003; // Verify raw data of the BET table
-enum SFILE_VERIFY_HASH_TABLE       = 0x0004; // Verify raw data of the hash table
-enum SFILE_VERIFY_BLOCK_TABLE      = 0x0005; // Verify raw data of the block table
-enum SFILE_VERIFY_HIBLOCK_TABLE    = 0x0006; // Verify raw data of the hi-block table
-enum SFILE_VERIFY_FILE             = 0x0007; // Verify raw data of a file
+/// Verify raw MPQ header
+enum SFILE_VERIFY_MPQ_HEADER       = 0x0001; 
+/// Verify raw data of the HET table
+enum SFILE_VERIFY_HET_TABLE        = 0x0002; 
+/// Verify raw data of the BET table
+enum SFILE_VERIFY_BET_TABLE        = 0x0003; 
+/// Verify raw data of the hash table
+enum SFILE_VERIFY_HASH_TABLE       = 0x0004; 
+/// Verify raw data of the block table
+enum SFILE_VERIFY_BLOCK_TABLE      = 0x0005; 
+/// Verify raw data of the hi-block table
+enum SFILE_VERIFY_HIBLOCK_TABLE    = 0x0006; 
+/// Verify raw data of a file
+enum SFILE_VERIFY_FILE             = 0x0007; 
 
 // Signature types
-enum SIGNATURE_TYPE_NONE           = 0x0000; // The archive has no signature in it
-enum SIGNATURE_TYPE_WEAK           = 0x0001; // The archive has weak signature
-enum SIGNATURE_TYPE_STRONG         = 0x0002; // The archive has strong signature
+/// The archive has no signature in it
+enum SIGNATURE_TYPE_NONE           = 0x0000; 
+/// The archive has weak signature
+enum SIGNATURE_TYPE_WEAK           = 0x0001; 
+/// The archive has strong signature
+enum SIGNATURE_TYPE_STRONG         = 0x0002; 
 
 // Return values for SFileVerifyArchive
-enum ERROR_NO_SIGNATURE                 = 0; // There is no signature in the MPQ
-enum ERROR_VERIFY_FAILED                = 1; // There was an error during verifying signature (like no memory)
-enum ERROR_WEAK_SIGNATURE_OK            = 2; // There is a weak signature and sign check passed
-enum ERROR_WEAK_SIGNATURE_ERROR         = 3; // There is a weak signature but sign check failed
-enum ERROR_STRONG_SIGNATURE_OK          = 4; // There is a strong signature and sign check passed
-enum ERROR_STRONG_SIGNATURE_ERROR       = 5; // There is a strong signature but sign check failed
+/// There is no signature in the MPQ
+enum ERROR_NO_SIGNATURE                 = 0; 
+/// There was an error during verifying signature (like no memory)
+enum ERROR_VERIFY_FAILED                = 1; 
+/// There is a weak signature and sign check passed
+enum ERROR_WEAK_SIGNATURE_OK            = 2; 
+/// There is a weak signature but sign check failed
+enum ERROR_WEAK_SIGNATURE_ERROR         = 3; 
+/// There is a strong signature and sign check passed
+enum ERROR_STRONG_SIGNATURE_OK          = 4; 
+/// There is a strong signature but sign check failed
+enum ERROR_STRONG_SIGNATURE_ERROR       = 5; 
                                            
 enum MD5_DIGEST_SIZE                   = 0x10;
 enum SHA1_DIGEST_SIZE                  = 0x14;  // 160 bits
