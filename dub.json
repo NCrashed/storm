@@ -1,0 +1,11 @@
+{
+	"name": "storm",
+	"description": "Port of StormLib to D language",
+	"copyright": "Copyright © 1999-2014 Ladislav Zezula",
+	"license": "MIT",
+	"authors": [
+		"ladislav-zezula",
+		"NCrashed <ncrashed@gmail.com>"],
+	"dependencies": {
+	}
+}
