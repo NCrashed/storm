@@ -148,3 +148,44 @@ align(1) struct TMPQHeader
     /// MD5 of the MPQ header from signature to (including) MD5_HetTable
     ubyte[MD5_DIGEST_SIZE] MD5_MpqHeader;       
 }
+
+/// Hash table entry. All files in the archive are searched by their hashes.
+struct TMPQHash
+{
+    /// The hash of the file path, using method A.
+    uint dwName1;
+    
+    /// The hash of the file path, using method B.
+    uint dwName2;
+
+    version(LittleEndian)
+    {
+        /**
+        *   The language of the file. This is a Windows LANGID data type, and uses the same values.
+        *   0 indicates the default language (American English), or that the file is language-neutral.
+        */
+        ushort lcLocale;
+    
+        /**
+        *   The platform the file is used for. 0 indicates the default platform.
+        *   No other values have been observed.
+        *   Note: wPlatform is actually just BYTE, but since it has never been used, we don't care.
+        */
+        ushort wPlatform;
+    }
+    else
+    {
+        ushort wPlatform;
+        ushort lcLocale;
+    }
+
+    /**
+    *   If the hash table entry is valid, this is the index into the block table of the file.
+    *   Otherwise, one of the following two values:
+    *    - FFFFFFFFh: Hash table entry is empty, and has always been empty.
+    *                 Terminates searches for a given file.
+    *    - FFFFFFFEh: Hash table entry is empty, but was valid at some point (a deleted file).
+    *                 Does not terminate searches for a given file.
+    */
+    uint dwBlockIndex;
+}
