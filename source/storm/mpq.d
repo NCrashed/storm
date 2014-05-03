@@ -169,7 +169,7 @@ struct TMPQHash
         /**
         *   The platform the file is used for. 0 indicates the default platform.
         *   No other values have been observed.
-        *   Note: wPlatform is actually just BYTE, but since it has never been used, we don't care.
+        *   Note: wPlatform is actually just ubyte, but since it has never been used, we don't care.
         */
         ushort wPlatform;
     }
@@ -188,4 +188,191 @@ struct TMPQHash
     *                 Does not terminate searches for a given file.
     */
     uint dwBlockIndex;
+}
+
+/// File description block contains informations about the file
+struct TMPQBlock
+{
+    /// Offset of the beginning of the file, relative to the beginning of the archive.
+    uint dwFilePos;
+    
+    /// Compressed file size
+    uint dwCSize;
+    
+    /**
+    *   Only valid if the block is a file; otherwise meaningless, and should be 0.
+    *   If the file is compressed, this is the size of the uncompressed file data.
+    */
+    uint dwFSize;                      
+    
+    /// Flags for the file. See MPQ_FILE_XXXX constants
+    uint dwFlags;                      
+}
+
+/// Patch file information, preceding the sector offset table
+struct TPatchInfo
+{
+    /// Length of patch info header, in bytes
+    uint dwLength;                             
+    /// Flags. 0x80000000 = MD5 (?)
+    uint dwFlags;                              
+    /// Uncompressed size of the patch file
+    uint dwDataSize;                           
+    /// MD5 of the entire patch file after decompression
+    ubyte[0x10] md5;                            
+
+    // Followed by the sector table (variable length)
+}
+
+/// Header for PTCH files 
+struct TPatchHeader
+{
+    //-- PATCH header -----------------------------------
+    /// 'PTCH'
+    uint dwSignature;                          
+    /// Size of the entire patch (decompressed)
+    uint dwSizeOfPatchData;                    
+    /// Size of the file before patch
+    uint dwSizeBeforePatch;                    
+    /// Size of file after patch
+    uint dwSizeAfterPatch;                     
+    
+    //-- MD5 block --------------------------------------
+    /// 'MD5_'
+    uint dwMD5;                                
+    /// Size of the MD5 block, including the signature and size itself
+    uint dwMd5BlockSize;                       
+    /// MD5 of the original (unpatched) file
+    ubyte[0x10] md5_before_patch;                
+    /// MD5 of the patched file
+    ubyte[0x10] md5_after_patch;                 
+
+    //-- XFRM block -------------------------------------
+    /// 'XFRM'
+    uint dwXFRM;                               
+    /// Size of the XFRM block, includes XFRM header and patch data
+    uint dwXfrmBlockSize;                      
+    /// Type of patch ('BSD0' or 'COPY')
+    uint dwPatchType;                          
+
+    // Followed by the patch data
+}
+
+enum SIZE_OF_XFRM_HEADER = 0x0C;
+
+/**
+*   This is the combined file entry for maintaining file list in the MPQ.
+*   This structure is combined from block table, hi-block table,
+*   (attributes) file and from (listfile).
+*/
+struct TFileEntry
+{
+    /// Jenkins hash of the file name. Only used when the MPQ has BET table.
+    ulong FileNameHash;                     
+    /// Position of the file content in the MPQ, relative to the MPQ header
+    ulong ByteOffset;                       
+    /// FileTime from the (attributes) file. 0 if not present.
+    ulong FileTime;                         
+    /// Index to the hash table. Only used when the MPQ has classic hash table
+    uint     dwHashIndex;                      
+    /// Decompressed size of the file
+    uint     dwFileSize;                       
+    /// Compressed size of the file (i.e., size of the file data in the MPQ)
+    uint     dwCmpSize;                        
+    /// File flags (from block table)
+    uint     dwFlags;                          
+    /// Locale ID for the file
+    ushort    lcLocale;                         
+    /// Platform ID for the file
+    ushort    wPlatform;                       
+    /// CRC32 from (attributes) file. 0 if not present. 
+    uint     dwCrc32;                   
+    /// File MD5 from the (attributes) file. 0 if not present.       
+    ubyte[MD5_DIGEST_SIZE] md5;         
+    /// File name. NULL if not known.
+    string szFileName;                          
+}
+
+/// Common header for HET and BET tables
+struct TMPQExtHeader
+{
+    /// 'HET\x1A' or 'BET\x1A'
+    uint dwSignature;                          
+    /// Version. Seems to be always 1
+    uint dwVersion;                            
+    /// Size of the contained table
+    uint dwDataSize;                           
+
+    // Followed by the table header
+    // Followed by the table data
+
+}
+
+/// Structure for HET table header
+struct TMPQHetHeader
+{
+    TMPQExtHeader ExtHdr;
+
+    /// Size of the entire HET table, including HET_TABLE_HEADER (in bytes)
+    uint dwTableSize;                      
+    /// Number of occupied entries in the HET table
+    uint dwEntryCount;                     
+    /// Total number of entries in the HET table
+    uint dwTotalCount;                     
+    /// Size of the name hash entry (in bits)
+    uint dwNameHashBitSize;                
+    /// Total size of file index (in bits)
+    uint dwIndexSizeTotal;                 
+    /// Extra bits in the file index
+    uint dwIndexSizeExtra;                 
+    /// Effective size of the file index (in bits)
+    uint dwIndexSize;                      
+    /// Size of the block index subtable (in bytes)
+    uint dwIndexTableSize;                 
+
+}
+
+/// Structure for BET table header
+struct TMPQBetHeader
+{
+    TMPQExtHeader ExtHdr;
+
+    /// Size of the entire BET table, including the header (in bytes)
+    uint dwTableSize;                      
+    /// Number of entries in the BET table. Must match HET_TABLE_HEADER::dwEntryCount
+    uint dwEntryCount;                     
+    uint dwUnknown08;
+    /// Size of one table entry (in bits)
+    uint dwTableEntrySize;                 
+    /// Bit index of the file position (within the entry record)
+    uint dwBitIndex_FilePos;               
+    /// Bit index of the file size (within the entry record)
+    uint dwBitIndex_FileSize;              
+    /// Bit index of the compressed size (within the entry record)
+    uint dwBitIndex_CmpSize;               
+    /// Bit index of the flag index (within the entry record)
+    uint dwBitIndex_FlagIndex;             
+    /// Bit index of the ??? (within the entry record)
+    uint dwBitIndex_Unknown;               
+    /// Bit size of file position (in the entry record)
+    uint dwBitCount_FilePos;               
+    /// Bit size of file size (in the entry record)
+    uint dwBitCount_FileSize;              
+    /// Bit size of compressed file size (in the entry record)
+    uint dwBitCount_CmpSize;               
+    /// Bit size of flags index (in the entry record)
+    uint dwBitCount_FlagIndex;             
+    /// Bit size of ??? (in the entry record)
+    uint dwBitCount_Unknown;               
+    /// Total bit size of the NameHash2
+    uint dwBitTotal_NameHash2;             
+    /// Extra bits in the NameHash2
+    uint dwBitExtra_NameHash2;             
+    /// Effective size of NameHash2 (in bits)
+    uint dwBitCount_NameHash2;             
+    /// Size of NameHash2 table, in bytes
+    uint dwNameHashArraySize;              
+    /// Number of flags in the following array
+    uint dwFlagCount;                      
+
 }
