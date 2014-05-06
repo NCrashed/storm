@@ -15,13 +15,18 @@ module storm.mpq;
 
 import storm.constants;
 import storm.bitarray;
-import storm.miscs;
+import storm.fileinfo;
+import storm.callback;
+import storm.filestream;
 
 enum MPQ_HEADER_SIZE_V1  = 0x20;
 enum MPQ_HEADER_SIZE_V2  = 0x2C;
 enum MPQ_HEADER_SIZE_V3  = 0x44;
 enum MPQ_HEADER_SIZE_V4  = 0xD0;
 enum MPQ_HEADER_DWORDS   = MPQ_HEADER_SIZE_V4 / 0x04;
+
+/// Hashing function
+alias HASH_STRING = uint function(string fileName, uint hashType);
 
 struct TMPQUserData
 {
