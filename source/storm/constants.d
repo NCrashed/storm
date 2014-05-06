@@ -352,28 +352,3 @@ enum ERROR_STRONG_SIGNATURE_ERROR       = 5;
 enum MD5_DIGEST_SIZE                   = 0x10;
 enum SHA1_DIGEST_SIZE                  = 0x14;  // 160 bits
 enum LANG_NEUTRAL                      = 0x00;  // Neutral locale
-
-version(Posix)
-{
-    import core.stdc.errno;
-    
-    enum ERROR_SUCCESS                  = 0;
-    enum ERROR_FILE_NOT_FOUND           = ENOENT;
-    enum ERROR_ACCESS_DENIED            = EPERM;
-    enum ERROR_INVALID_HANDLE           = EBADF;
-    enum ERROR_NOT_ENOUGH_MEMORY        = ENOMEM;
-    enum ERROR_NOT_SUPPORTED            = ENOTSUP;
-    enum ERROR_INVALID_PARAMETER        = EINVAL;
-    enum ERROR_DISK_FULL                = ENOSPC;
-    enum ERROR_ALREADY_EXISTS           = EEXIST;
-    enum ERROR_INSUFFICIENT_BUFFER      = ENOBUFS;
-    enum ERROR_BAD_FORMAT               = 1000;        // No such error code under Linux
-    enum ERROR_NO_MORE_FILES            = 1001;        // No such error code under Linux
-    enum ERROR_HANDLE_EOF               = 1002;        // No such error code under Linux
-    enum ERROR_CAN_NOT_COMPLETE         = 1003;        // No such error code under Linux
-    enum ERROR_FILE_CORRUPT             = 1004;        // No such error code under Linux
-}
-version(Windows)
-{
-    public import core.sys.windows.windows;
-}
