@@ -6,6 +6,83 @@
 module storm.filestream;
 
 import storm.callback;
+import storm.constants;
+import storm.errors;
+
+/**
+*   This function creates a new file for read-write access
+*
+*   - If the current platform supports file sharing,
+*     the file must be created for read sharing (i.e. another application
+*     can open the file for read, but not for write)
+*   - If the file does not exist, the function must create new one
+*   - If the file exists, the function must rewrite it and set to zero size
+*   - The parameters of the function must be validate by the caller
+*   - The function must initialize all stream function pointers in TFileStream
+*   - If the function fails from any reason, it must close all handles
+*     and free all memory that has been allocated in the process of stream creation,
+*     including the TFileStream structure itself
+*
+*   Params:
+*       szFileName  Name of the file to create
+*/
+TFileStream FileStream_CreateFile(
+    string szFileName,
+    uint   dwStreamFlags)
+{
+    TFileStream pStream;
+
+    // We only support creation of flat, local file
+    if((dwStreamFlags & (STREAM_PROVIDERS_MASK)) != (STREAM_PROVIDER_FLAT | BASE_PROVIDER_FILE))
+    {
+        SetLastError(ERROR_NOT_SUPPORTED);
+        return null;
+    }
+
+    // Allocate file stream structure for flat stream
+    pStream = AllocateFileStream(szFileName, dwStreamFlags);
+    if(pStream !is null)
+    {
+        // Attempt to create the disk file
+        if(BaseFile_Create(pStream))
+        {
+            // Fill the stream provider functions
+            pStream.StreamRead    = pStream.BaseRead;
+            pStream.StreamWrite   = pStream.BaseWrite;
+            pStream.StreamResize  = pStream.BaseResize;
+            pStream.StreamGetSize = pStream.BaseGetSize;
+            pStream.StreamGetPos  = pStream.BaseGetPos;
+            pStream.StreamClose   = pStream.BaseClose;
+            return pStream;
+        }
+
+        // File create failed, delete the stream
+        pStream = null;
+    }
+
+    // Return the stream
+    return pStream;
+}
+
+//=============================================================================
+package:
+
+version(Windows) import core.sys.windows.windows;
+version(Posix)
+{
+    import core.stdc.stdio;
+    import core.sys.posix.fcntl;
+    import core.sys.posix.sys.stat;
+    import core.sys.posix.sys.types;
+    import core.sys.posix.unistd;
+    import core.stdc.errno;
+}
+
+import std.string;
+import std.algorithm;
+import std.range;
+
+enum INVALID_HANDLE_VALUE = cast(void*)(cast(size_t)-1);
 
 //-----------------------------------------------------------------------------
 // Function prototypes
@@ -26,13 +103,13 @@ alias STREAM_OPEN = bool function(
 
 alias STREAM_READ = bool function(
     TFileStream pStream,                // Pointer to an open stream
-    ulong* pByteOffset,                 // Pointer to file byte offset. If NULL, it reads from the current position
+    ulong* pByteOffset,                 // Pointer to file byte offset. If null, it reads from the current position
     ubyte[] pvBuffer                    // Pointer to data to be read
     );
 
 alias STREAM_WRITE = bool function(
     TFileStream pStream,            // Pointer to an open stream
-    ulong* pByteOffset,             // Pointer to file byte offset. If NULL, it writes to the current position
+    ulong* pByteOffset,             // Pointer to file byte offset. If null, it writes to the current position
     const ubyte[] pvBuffer          // Pointer to data to be written
     );
 
@@ -118,15 +195,15 @@ struct FILE_BITMAP_FOOTER
 
 union TBaseProviderData
 {
-    struct File
+    struct SFile
     {
         ulong FileSize;                 // Size of the file
         ulong FilePos;                  // Current file position
         ulong FileTime;                 // Last write time
         void* hFile;                    // File handle
-    } 
+    }
 
-    struct Map
+    struct SMap
     {
         ulong FileSize;                 // Size of the file
         ulong FilePos;                  // Current file position
@@ -134,7 +211,7 @@ union TBaseProviderData
         ubyte* pbFile;                  // Pointer to mapped view
     }
 
-    struct Http
+    struct SHttp
     {
         ulong FileSize;                 // Size of the file
         ulong FilePos;                  // Current file position
@@ -142,6 +219,10 @@ union TBaseProviderData
         void* hInternet;                // Internet handle
         void* hConnect;                 // Connection to the internet server
     }
+    
+    SFile File;
+    SMap  Map;
+    SHttp Http;
 }
 
 class TFileStream
@@ -172,7 +253,7 @@ class TFileStream
     TBaseProviderData Base;
 
     // Stream provider data
-    TFileStream * pMaster;                  // Master stream (e.g. MPQ on a web server)
+    TFileStream pMaster;                    // Master stream (e.g. MPQ on a web server)
     string szFileName;                      // File name (self-relative pointer)
 
     ulong StreamSize;                      // Stream size (can be less than file size)
@@ -206,4 +287,431 @@ enum MPQE_CHUNK_SIZE = 0x40;                // Size of one chunk to be decrypted
 class TEncryptedStream : TBlockStream
 {
     ubyte[MPQE_CHUNK_SIZE] Key;              // File key
+}
+
+//-----------------------------------------------------------------------------
+// Dummy init function
+
+static void BaseNone_Init(TFileStream)
+{
+    // Nothing here
+}
+
+//-----------------------------------------------------------------------------
+// Local functions - base file support
+
+bool BaseFile_Create(TFileStream pStream)
+{
+    version(Windows)
+    {
+        DWORD dwWriteShare = (pStream.dwFlags & STREAM_FLAG_WRITE_SHARE) ? FILE_SHARE_WRITE : 0;
+
+        pStream.Base.File.hFile = CreateFile(pStream.szFileName.toStringz,
+                                              GENERIC_READ | GENERIC_WRITE,
+                                              dwWriteShare | FILE_SHARE_READ,
+                                              null,
+                                              CREATE_ALWAYS,
+                                              0,
+                                              null);
+        if(pStream.Base.File.hFile == INVALID_HANDLE_VALUE)
+            return false;
+    }
+
+
+    version(Posix)
+    {
+        intptr_t handle;
+        
+        handle = open64(pStream.szFileName.toStringz, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+        if(handle == -1)
+        {
+            SetLastError(errno);
+            return false;
+        }
+        
+        pStream.Base.File.hFile = cast(void*)handle;
+    }
+
+    // Reset the file size and position
+    pStream.Base.File.FileSize = 0;
+    pStream.Base.File.FilePos = 0;
+    return true;
+}
+
+bool BaseFile_Open(TFileStream pStream, string szFileName, uint dwStreamFlags)
+{
+    version(Windows)
+    {
+        ULARGE_INTEGER FileSize;
+        DWORD dwWriteAccess = (dwStreamFlags & STREAM_FLAG_READ_ONLY) ? 0 : FILE_WRITE_DATA | FILE_APPEND_DATA | FILE_WRITE_ATTRIBUTES;
+        DWORD dwWriteShare = (dwStreamFlags & STREAM_FLAG_WRITE_SHARE) ? FILE_SHARE_WRITE : 0;
+
+        // Open the file
+        pStream.Base.File.hFile = CreateFile(szFileName,
+                                              FILE_READ_DATA | FILE_READ_ATTRIBUTES | dwWriteAccess,
+                                              FILE_SHARE_READ | dwWriteShare,
+                                              null,
+                                              OPEN_EXISTING,
+                                              0,
+                                              null);
+        if(pStream.Base.File.hFile == INVALID_HANDLE_VALUE)
+            return false;
+
+        // Query the file size
+        FileSize.LowPart = GetFileSize(pStream.Base.File.hFile, &FileSize.HighPart);
+        pStream.Base.File.FileSize = FileSize.QuadPart;
+
+        // Query last write time
+        GetFileTime(pStream.Base.File.hFile, null, null, (LPFILETIME)&pStream.Base.File.FileTime);
+    }
+
+    version(Posix)
+    {
+        stat_t fileinfo;
+        int oflag = (dwStreamFlags & STREAM_FLAG_READ_ONLY) ? O_RDONLY : O_RDWR;
+        intptr_t handle;
+
+        // Open the file
+        handle = open64(szFileName.toStringz, oflag);
+        if(handle == -1)
+        {
+            SetLastError(errno);
+            return false;
+        }
+
+        // Get the file size
+        if(fstat64(cast(int)handle, &fileinfo) == -1)
+        {
+            SetLastError(errno);
+            return false;
+        }
+
+        // time_t is number of seconds since 1.1.1970, UTC.
+        // 1 second = 10000000 (decimal) in FILETIME
+        // Set the start to 1.1.1970 00:00:00
+        pStream.Base.File.FileTime = 0x019DB1DED53E8000U + (10000000 * fileinfo.st_mtime);
+        pStream.Base.File.FileSize = cast(ulong)fileinfo.st_size;
+        pStream.Base.File.hFile = cast(void*)handle;
+    }
+
+    // Reset the file position
+    pStream.Base.File.FilePos = 0;
+    return true;
+}
+
+static bool BaseFile_Read(
+    TFileStream   pStream,                  // Pointer to an open stream
+    ulong * pByteOffset,                    // Pointer to file byte offset. If null, it reads from the current position
+    ubyte[] pvBuffer)                       // Pointer to data to be read
+{
+    ulong ByteOffset = (pByteOffset !is null) ? *pByteOffset : pStream.Base.File.FilePos;
+    uint dwBytesRead = 0;                  // Must be set by platform-specific code
+
+    version(Windows)
+    {
+        // Note: StormLib no longer supports Windows 9x.
+        // Thus, we can use the OVERLAPPED structure to specify
+        // file offset to read from file. This allows us to skip
+        // one system call to SetFilePointer
+
+        // Update the byte offset
+        pStream.Base.File.FilePos = ByteOffset;
+
+        // Read the data
+        if(pvBuffer.length != 0)
+        {
+            OVERLAPPED Overlapped;
+
+            Overlapped.OffsetHigh = cast(DWORD)(ByteOffset >> 32);
+            Overlapped.Offset = cast(DWORD)ByteOffset;
+            Overlapped.hEvent = null;
+            if(!ReadFile(pStream.Base.File.hFile, pvBuffer.ptr, pvBuffer.length, &dwBytesRead, &Overlapped))
+                return false;
+        }
+    }
+
+    version(Posix)
+    {
+        ssize_t bytes_read;
+
+        // If the byte offset is different from the current file position,
+        // we have to update the file position
+        if(ByteOffset != pStream.Base.File.FilePos)
+        {
+            lseek64(cast(int)pStream.Base.File.hFile, cast(off_t)(ByteOffset), SEEK_SET);
+            pStream.Base.File.FilePos = ByteOffset;
+        }
+
+        // Perform the read operation
+        if(pvBuffer.length != 0)
+        {
+            bytes_read = read(cast(int)pStream.Base.File.hFile, pvBuffer.ptr, pvBuffer.length);
+            if(bytes_read == -1)
+            {
+                SetLastError(errno);
+                return false;
+            }
+            
+            dwBytesRead = cast(uint)cast(size_t)bytes_read;
+        }
+    }
+
+    // Increment the current file position by number of bytes read
+    // If the number of bytes read doesn't match to required amount, return false
+    pStream.Base.File.FilePos = ByteOffset + dwBytesRead;
+    if(dwBytesRead != pvBuffer.length)
+        SetLastError(ERROR_HANDLE_EOF);
+    return (dwBytesRead == pvBuffer.length);
+}
+
+/**
+*   Params:
+*       pStream         Pointer to an open stream
+*       pByteOffset     Pointer to file byte offset. If null, writes to current position
+*       pvBuffer        Pointer to data to be written
+*       dwBytesToWrite  Number of bytes to write to the file
+*/
+bool BaseFile_Write(TFileStream pStream, ulong * pByteOffset, const ubyte[] pvBuffer)
+{
+    ulong ByteOffset = (pByteOffset !is null) ? *pByteOffset : pStream.Base.File.FilePos;
+    uint dwBytesWritten = 0;               // Must be set by platform-specific code
+
+    version(Windows)
+    {
+        // Note: StormLib no longer supports Windows 9x.
+        // Thus, we can use the OVERLAPPED structure to specify
+        // file offset to read from file. This allows us to skip
+        // one system call to SetFilePointer
+
+        // Update the byte offset
+        pStream.Base.File.FilePos = ByteOffset;
+
+        // Write the data
+        if(pvBuffer.length != 0)
+        {
+            OVERLAPPED Overlapped;
+
+            Overlapped.OffsetHigh = cast(DWORD)(ByteOffset >> 32);
+            Overlapped.Offset = cast(DWORD)ByteOffset;
+            Overlapped.hEvent = null;
+            if(!WriteFile(pStream.Base.File.hFile, pvBuffer.ptr, pvBuffer.length, &dwBytesWritten, &Overlapped))
+                return false;
+        }
+    }
+
+    version(Posix)
+    {
+        ssize_t bytes_written;
+
+        // If the byte offset is different from the current file position,
+        // we have to update the file position
+        if(ByteOffset != pStream.Base.File.FilePos)
+        {
+            lseek64(cast(int)pStream.Base.File.hFile, cast(off_t)(ByteOffset), SEEK_SET);
+            pStream.Base.File.FilePos = ByteOffset;
+        }
+
+        // Perform the read operation
+        bytes_written = write(cast(int)pStream.Base.File.hFile, pvBuffer.ptr, pvBuffer.length);
+        if(bytes_written == -1)
+        {
+            SetLastError(errno);
+            return false;
+        }
+        
+        dwBytesWritten = cast(uint)cast(size_t)bytes_written;
+    }
+
+    // Increment the current file position by number of bytes read
+    pStream.Base.File.FilePos = ByteOffset + dwBytesWritten;
+
+    // Also modify the file size, if needed
+    if(pStream.Base.File.FilePos > pStream.Base.File.FileSize)
+        pStream.Base.File.FileSize = pStream.Base.File.FilePos;
+
+    if(dwBytesWritten != pvBuffer.length)
+        SetLastError(ERROR_DISK_FULL);
+    return (dwBytesWritten == pvBuffer.length);
+}
+
+/**
+*   Params:
+*      pStream     Pointer to an open stream
+*      NewFileSize New size of the file
+*/
+bool BaseFile_Resize(TFileStream pStream, ulong NewFileSize)
+{
+    version(Windows)
+    {
+        LONG FileSizeHi = cast(LONG)(NewFileSize >> 32);
+        LONG FileSizeLo;
+        DWORD dwNewPos;
+        bool bResult;
+
+        // Set the position at the new file size
+        dwNewPos = SetFilePointer(pStream.Base.File.hFile, cast(LONG)NewFileSize, &FileSizeHi, FILE_BEGIN);
+        if(dwNewPos == INVALID_SET_FILE_POINTER && GetLastError() != ERROR_SUCCESS)
+            return false;
+
+        // Set the current file pointer as the end of the file
+        bResult = cast(bool)SetEndOfFile(pStream.Base.File.hFile);
+        if(bResult)
+            pStream.Base.File.FileSize = NewFileSize;
+
+        // Restore the file position
+        FileSizeHi = cast(LONG)(pStream.Base.File.FilePos >> 32);
+        FileSizeLo = cast(LONG)(pStream.Base.File.FilePos);
+        SetFilePointer(pStream.Base.File.hFile, FileSizeLo, &FileSizeHi, FILE_BEGIN);
+        return bResult;
+    }
+    
+    version(Posix)
+    {
+        if(ftruncate64(cast(int)pStream.Base.File.hFile, cast(off_t)NewFileSize) == -1)
+        {
+            SetLastError(errno);
+            return false;
+        }
+        
+        pStream.Base.File.FileSize = NewFileSize;
+        return true;
+    }
+}
+
+// Gives the current file size
+bool BaseFile_GetSize(TFileStream pStream, out ulong pFileSize)
+{
+    // Note: Used by all three base providers.
+    // Requires the TBaseData union to have the same layout for all three base providers
+    pFileSize = pStream.Base.File.FileSize;
+    return true;
+}
+
+// Gives the current file position
+bool BaseFile_GetPos(TFileStream pStream, out ulong pByteOffset)
+{
+    // Note: Used by all three base providers.
+    // Requires the TBaseData union to have the same layout for all three base providers
+    pByteOffset = pStream.Base.File.FilePos;
+    return true;
+}
+
+// Renames the file pointed by pStream so that it contains data from pNewStream
+bool BaseFile_Replace(TFileStream pStream, TFileStream pNewStream)
+{
+    version(Windows)
+    {
+        // Delete the original stream file. Don't check the result value,
+        // because if the file doesn't exist, it would fail
+        DeleteFile(pStream.szFileName.toStringz);
+    
+        // Rename the new file to the old stream's file
+        return cast(bool)MoveFile(pNewStream.szFileName.toStringz, pStream.szFileName.toStringz);
+    }
+    
+    version(Posix)
+    {
+        // "rename" on Linux also works if the target file exists
+        if(rename(pNewStream.szFileName.toStringz, pStream.szFileName.toStringz) == -1)
+        {
+            SetLastError(errno);
+            return false;
+        }
+        
+        return true;
+    }
+}
+
+void BaseFile_Close(TFileStream pStream)
+{
+    if(pStream.Base.File.hFile != INVALID_HANDLE_VALUE)
+    {
+        version(Windows)
+            CloseHandle(pStream.Base.File.hFile);
+
+        version(Posix)
+            close(cast(int)pStream.Base.File.hFile);
+    }
+
+    // Also invalidate the handle
+    pStream.Base.File.hFile = INVALID_HANDLE_VALUE;
+}
+
+// Initializes base functions for the disk file
+static void BaseFile_Init(TFileStream pStream)
+{
+    pStream.BaseCreate  = &BaseFile_Create;
+    pStream.BaseOpen    = &BaseFile_Open;
+    pStream.BaseRead    = &BaseFile_Read;
+    pStream.BaseWrite   = &BaseFile_Write;
+    pStream.BaseResize  = &BaseFile_Resize;
+    pStream.BaseGetSize = &BaseFile_GetSize;
+    pStream.BaseGetPos  = &BaseFile_GetPos;
+    pStream.BaseClose   = &BaseFile_Close;
+}
+
+//-----------------------------------------------------------------------------
+// File stream allocation function
+
+static STREAM_INIT StreamBaseInit[4] =
+[
+    &BaseFile_Init,
+    &BaseMap_Init, 
+    &BaseHttp_Init,
+    &BaseNone_Init
+];
+
+/**
+*   This function allocates an empty structure for the file stream
+*   The stream structure is created as flat block, variable length
+*   The file name is placed after the end of the stream structure data
+*/
+TFileStream AllocateFileStream(
+    string szFileName,
+    uint dwStreamFlags)
+{
+    TFileStream pMaster = null;
+    TFileStream pStream = null;
+
+    // The caller can specify chain of files in the following form:
+    // C:\archive.MPQ*http://www.server.com/MPQs/archive-server.MPQ
+    // In that case, we use the part after "*" as master file name
+    auto spl = szFileName.splitter('*').array;
+    
+    // Don't allow another master file in the string
+    if(spl.length > 3)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return null;
+    }
+    // If we have a next file, we need to open it as master stream
+    // Note that we don't care if the master stream exists or not,
+    // If it doesn't, later attempts to read missing file block will fail
+    else if(spl.length == 3)
+    {
+        // Open the master file
+        pMaster = FileStream_OpenFile(spl[2], STREAM_FLAG_READ_ONLY);
+    }
+    
+    // Allocate the stream structure for the given stream type
+    pStream = new TFileStream;
+    if(pStream !is null)
+    {
+        pStream.pMaster = pMaster;
+        pStream.dwFlags = dwStreamFlags;
+        
+        // Initialize the file name
+        pStream.szFileName = szFileName;
+
+        // Initialize the stream functions
+        StreamBaseInit[dwStreamFlags & 0x03](pStream);
+    }
+
+    return pStream;
+}
+// ensure of std behavior
+unittest
+{
+    assert(splitter("C:\archive.MPQ*http://www.server.com/MPQs/archive-server.MPQ", '*').equal(["C:\archive.MPQ", "", "http://www.server.com/MPQs/archive-server.MPQ"]));
+    assert(splitter("C:\archive.MPQ", '*').equal(["C:\archive.MPQ"]));
 }
