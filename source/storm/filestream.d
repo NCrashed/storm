@@ -11,52 +11,52 @@ import storm.callback;
 // Function prototypes
 
 alias STREAM_INIT = void function(
-    TFileStream* pStream        // Pointer to an unopened stream
+    TFileStream pStream        // Pointer to an unopened stream
     );
 
 alias STREAM_CREATE = bool function(
-    TFileStream* pStream        // Pointer to an unopened stream
+    TFileStream pStream        // Pointer to an unopened stream
     );
 
 alias STREAM_OPEN = bool function(
-    TFileStream* pStream,          // Pointer to an unopened stream
+    TFileStream pStream,           // Pointer to an unopened stream
     string szFileName,             // Pointer to file name to be open
     uint dwStreamFlags             // Stream flags
     );
 
 alias STREAM_READ = bool function(
-    TFileStream* pStream,               // Pointer to an open stream
+    TFileStream pStream,                // Pointer to an open stream
     ulong* pByteOffset,                 // Pointer to file byte offset. If NULL, it reads from the current position
     ubyte[] pvBuffer                    // Pointer to data to be read
     );
 
 alias STREAM_WRITE = bool function(
-    TFileStream* pStream,           // Pointer to an open stream
+    TFileStream pStream,            // Pointer to an open stream
     ulong* pByteOffset,             // Pointer to file byte offset. If NULL, it writes to the current position
     const ubyte[] pvBuffer          // Pointer to data to be written
     );
 
 alias STREAM_RESIZE = bool function(
-    TFileStream* pStream,           // Pointer to an open stream
+    TFileStream pStream,           // Pointer to an open stream
     ulong FileSize                  // New size for the file, in bytes
     );
 
 alias STREAM_GETSIZE = bool function(
-    TFileStream* pStream,           // Pointer to an open stream
+    TFileStream pStream,           // Pointer to an open stream
     out ulong pFileSize             // Receives the file size, in bytes
     );
 
 alias STREAM_GETPOS = bool function(
-    TFileStream* pStream,           // Pointer to an open stream
+    TFileStream pStream,           // Pointer to an open stream
     out ulong pByteOffset           // Pointer to store current file position
     );
 
 alias STREAM_CLOSE = void function(
-    TFileStream* pStream            // Pointer to an open stream
+    TFileStream pStream            // Pointer to an open stream
     );
 
 alias BLOCK_READ = bool function(
-    ref TFileStream pStream,        // Pointer to a block-oriented stream
+    TFileStream pStream,            // Pointer to a block-oriented stream
     ulong StartOffset,              // Byte offset of start of the block array
     ulong EndOffset,                // End offset (either end of the block or end of the file)
     ubyte[] BlockBuffer,            // Pointer to block-aligned buffer
@@ -65,12 +65,12 @@ alias BLOCK_READ = bool function(
     );
 
 alias BLOCK_CHECK = bool function(
-    ref TFileStream pStream,          // Pointer to a block-oriented stream
+    TFileStream pStream,              // Pointer to a block-oriented stream
     ulong BlockOffset                 // Offset of the file to check
     );
 
 alias BLOCK_SAVEMAP = void function(
-    ref TFileStream pStream          // Pointer to a block-oriented stream
+    TFileStream pStream          // Pointer to a block-oriented stream
     );
 
 //-----------------------------------------------------------------------------
