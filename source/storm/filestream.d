@@ -75,6 +75,7 @@ version(Posix)
     import core.sys.posix.sys.stat;
     import core.sys.posix.sys.types;
     import core.sys.posix.unistd;
+    import core.sys.posix.sys.mman;
     import core.stdc.errno;
 }
 
@@ -648,6 +649,156 @@ static void BaseFile_Init(TFileStream pStream)
     pStream.BaseGetSize = &BaseFile_GetSize;
     pStream.BaseGetPos  = &BaseFile_GetPos;
     pStream.BaseClose   = &BaseFile_Close;
+}
+
+//-----------------------------------------------------------------------------
+// Local functions - base memory-mapped file support
+
+bool BaseMap_Open(TFileStream pStream, string szFileName, uint dwStreamFlags)
+{
+    version(Windows)
+    {
+        ULARGE_INTEGER FileSize;
+        HANDLE hFile;
+        HANDLE hMap;
+        bool bResult = false;
+    
+        // Keep compiler happy
+        dwStreamFlags = dwStreamFlags;
+    
+        // Open the file for read access
+        hFile = CreateFile(szFileName.toStringz, FILE_READ_DATA, FILE_SHARE_READ, null, OPEN_EXISTING, 0, null);
+        if(hFile !is null)
+        {
+            // Retrieve file size. Don't allow mapping file of a zero size.
+            FileSize.LowPart = GetFileSize(hFile, &FileSize.HighPart);
+            if(FileSize.QuadPart != 0)
+            {
+                // Now create mapping object
+                hMap = CreateFileMapping(hFile, null, PAGE_READONLY, 0, 0, null);
+                if(hMap !is null)
+                {
+                    // Map the entire view into memory
+                    // Note that this operation will fail if the file can't fit
+                    // into usermode address space
+                    pStream.Base.Map.pbFile = cast(byte*)MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
+                    if(pStream.Base.Map.pbFile !is null)
+                    {
+                        // Retrieve file time
+                        GetFileTime(hFile, null, null, cast(LPFILETIME)&pStream.Base.Map.FileTime);
+    
+                        // Retrieve file size and position
+                        pStream.Base.Map.FileSize = FileSize.QuadPart;
+                        pStream.Base.Map.FilePos = 0;
+                        bResult = true;
+                    }
+    
+                    // Close the map handle
+                    CloseHandle(hMap);
+                }
+            }
+    
+            // Close the file handle
+            CloseHandle(hFile);
+        }
+    
+        // If the file is not there and is not available for random access,
+        // report error
+        if(bResult == false)
+            return false;
+    }
+
+    version(Posix)
+    {
+        stat_t fileinfo;
+        intptr_t handle;
+        bool bResult = false;
+    
+        // Open the file
+        handle = open(szFileName.toStringz, O_RDONLY);
+        if(handle != -1)
+        {
+            // Get the file size
+            if(fstat64(cast(int)handle, &fileinfo) != -1)
+            {
+                pStream.Base.Map.pbFile = cast(ubyte*)mmap(null, cast(size_t)fileinfo.st_size, PROT_READ, MAP_PRIVATE, cast(int)handle, 0);
+                if(pStream.Base.Map.pbFile !is null)
+                {
+                    // time_t is number of seconds since 1.1.1970, UTC.
+                    // 1 second = 10000000 (decimal) in FILETIME
+                    // Set the start to 1.1.1970 00:00:00
+                    pStream.Base.Map.FileTime = 0x019DB1DED53E8000U + (10000000 * fileinfo.st_mtime);
+                    pStream.Base.Map.FileSize = cast(ulong)fileinfo.st_size;
+                    pStream.Base.Map.FilePos = 0;
+                    bResult = true;
+                }
+            }
+            close(cast(int)handle);
+        }
+    
+        // Did the mapping fail?
+        if(bResult == false)
+        {
+            SetLastError(errno);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool BaseMap_Read(
+    TFileStream  pStream,                   // Pointer to an open stream
+    ulong * pByteOffset,                    // Pointer to file byte offset. If null, it reads from the current position
+    ubyte[] pvBuffer)                       // Pointer to data to be read
+{
+    ulong ByteOffset = (pByteOffset !is null) ? *pByteOffset : pStream.Base.Map.FilePos;
+
+    // Do we have to read anything at all?
+    if(pvBuffer.length != 0)
+    {
+        // Don't allow reading past file size
+        if((ByteOffset + pvBuffer.length) > pStream.Base.Map.FileSize)
+            return false;
+
+        // Copy the required data
+        memcpy(pvBuffer.ptr, pStream.Base.Map.pbFile + cast(size_t)ByteOffset, pvBuffer.length);
+    }
+
+    // Move the current file position
+    pStream.Base.Map.FilePos += pvBuffer.length;
+    return true;
+}
+
+void BaseMap_Close(TFileStream pStream)
+{
+    version(Windows)
+    {
+        if(pStream.Base.Map.pbFile !is null)
+            UnmapViewOfFile(pStream.Base.Map.pbFile);
+    }
+
+    version(Posix)
+    {
+        if(pStream.Base.Map.pbFile !is null)
+            munmap(pStream.Base.Map.pbFile, cast(size_t)pStream.Base.Map.FileSize);
+    }
+
+    pStream.Base.Map.pbFile = null;
+}
+
+// Initializes base functions for the mapped file
+void BaseMap_Init(TFileStream pStream)
+{
+    // Supply the file stream functions
+    pStream.BaseOpen    = &BaseMap_Open;
+    pStream.BaseRead    = &BaseMap_Read;
+    pStream.BaseGetSize = &BaseFile_GetSize;    // Reuse BaseFile function
+    pStream.BaseGetPos  = &BaseFile_GetPos;     // Reuse BaseFile function
+    pStream.BaseClose   = &BaseMap_Close;
+
+    // Mapped files are read-only
+    pStream.dwFlags |= STREAM_FLAG_READ_ONLY;
 }
 
 //-----------------------------------------------------------------------------
