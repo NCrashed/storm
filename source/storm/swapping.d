@@ -5,12 +5,12 @@
 *
 *   Swapping functions
 */
-module storm.mpq;
+module storm.swapping;
 
 version(LittleEndian)
 {
-    private void nothing(T...)(T args) {}
-    private T id(T)(T a) {return a;}
+    void nothing(T...)(T args) {}
+    T id(T)(T a) {return a;}
     
     alias    BSWAP_INT16_UNSIGNED          = id;
     alias    BSWAP_INT16_SIGNED            = id;
@@ -87,7 +87,7 @@ version(BigEndian)
     }
     
     // Swaps array of unsigned 16-bit integers
-    void ConvertUInt16Buffer(void[] ptr)
+    void ConvertUInt16Buffer(ubyte[] ptr)
     {
         ushort* buffer = (cast(ushort[])ptr).ptr;
         size_t nElements = ptr.length / ushort.sizeof;
@@ -100,7 +100,7 @@ version(BigEndian)
     }
     
     // Swaps array of unsigned 32-bit integers
-    void ConvertUInt32Buffer(void[] ptr)
+    void ConvertUInt32Buffer(ubyte[] ptr)
     {
         uint* buffer = (cast(uint[])ptr).ptr;
         size_t nElements = ptr.length / uint.sizeof;
@@ -113,7 +113,7 @@ version(BigEndian)
     }
     
     // Swaps array of unsigned 64-bit integers
-    void ConvertUInt64Buffer(void[] ptr)
+    void ConvertUInt64Buffer(ubyte[] ptr)
     {
         ulong * buffer = (cast(ulong[])ptr).ptr;
         size_t nElements = ptr.length / ulong.sizeof;

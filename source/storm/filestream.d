@@ -64,6 +64,143 @@ TFileStream FileStream_CreateFile(
     return pStream;
 }
 
+/**
+*  This function opens an existing file for read or read-write access
+*  - If the current platform supports file sharing,
+*    the file must be open for read sharing (i.e. another application
+*    can open the file for read, but not for write)
+*  - If the file does not exist, the function must return null
+*  - If the file exists but cannot be open, then function must return null
+*  - The parameters of the function must be validate by the caller
+*  - The function must initialize all stream function pointers in TFileStream
+*  - If the function fails from any reason, it must close all handles
+*    and free all memory that has been allocated in the process of stream creation,
+*     including the TFileStream structure itself
+*
+*   Params:
+*      szFileName       Name of the file to open
+*      dwStreamFlags    specifies the provider and base storage type
+*/
+TFileStream FileStream_OpenFile(
+    string szFileName,
+    uint dwStreamFlags)
+{
+    uint dwProvider = dwStreamFlags & STREAM_PROVIDERS_MASK;
+    size_t nPrefixLength = FileStream_Prefix(szFileName, &dwProvider);
+
+    // Re-assemble the stream flags
+    dwStreamFlags = (dwStreamFlags & STREAM_OPTIONS_MASK) | dwProvider;
+    szFileName = szFileName[nPrefixLength..$];
+
+    // Perform provider-specific open
+    switch(dwStreamFlags & STREAM_PROVIDER_MASK)
+    {
+        case STREAM_PROVIDER_FLAT:
+            return FlatStream_Open(szFileName, dwStreamFlags);
+
+        case STREAM_PROVIDER_PARTIAL:
+            return PartStream_Open(szFileName, dwStreamFlags);
+
+        case STREAM_PROVIDER_MPQE:
+            return MpqeStream_Open(szFileName, dwStreamFlags);
+
+        case STREAM_PROVIDER_BLOCK4:
+            return Block4Stream_Open(szFileName, dwStreamFlags);
+
+        default:
+            SetLastError(ERROR_INVALID_PARAMETER);
+            return null;
+    }
+}
+
+/**
+*   Returns the file name of the stream
+*
+*   Params:
+*      pStream  Pointer to an open stream
+*/
+string FileStream_GetFileName(TFileStream  pStream)
+{
+    assert(pStream !is null);
+    return pStream.szFileName;
+}
+
+/**
+*   Returns the length of the provider prefix. Returns zero if no prefix
+*
+*   Params:
+*       szFileName          Pointer to a stream name (file, mapped file, URL)
+*       pdwStreamProvider   Pointer to a DWORD variable that receives stream provider (STREAM_PROVIDER_XXX)
+*/
+size_t FileStream_Prefix(string szFileName, uint * pdwProvider)
+{
+    size_t nPrefixLength1 = 0;
+    size_t nPrefixLength2 = 0;
+    uint dwProvider = 0;
+
+    if(szFileName !is null)
+    {
+        //
+        // Determine the stream provider
+        //
+
+        if(!szFileName.find("flat-").empty)
+        {
+            dwProvider |= STREAM_PROVIDER_FLAT;
+            nPrefixLength1 = 5;
+        }
+        else if(!szFileName.find("part-").empty)
+        {
+            dwProvider |= STREAM_PROVIDER_PARTIAL;
+            nPrefixLength1 = 5;
+        }
+        else if(!szFileName.find("mpqe-").empty)
+        {
+            dwProvider |= STREAM_PROVIDER_MPQE;
+            nPrefixLength1 = 5;
+        }
+        else if(!szFileName.find("blk4-").empty)
+        {
+            dwProvider |= STREAM_PROVIDER_BLOCK4;
+            nPrefixLength1 = 5;
+        }
+
+        //
+        // Determine the base provider
+        //
+
+        if(!szFileName[nPrefixLength1..$].find("file:").empty)
+        {
+            dwProvider |= BASE_PROVIDER_FILE;
+            nPrefixLength2 = 5;
+        }
+        else if(!szFileName[nPrefixLength1..$].find("map:").empty)
+        {
+            dwProvider |= BASE_PROVIDER_MAP;
+            nPrefixLength2 = 4;
+        }
+        else if(!szFileName[nPrefixLength1..$].find("http:").empty)
+        {
+            dwProvider |= BASE_PROVIDER_HTTP;
+            nPrefixLength2 = 5;
+        }
+
+        // Only accept stream provider if we recognized the base provider
+        if(nPrefixLength2 != 0)
+        {
+            // It is also allowed to put "//" after the base provider, e.g. "file://", "http://"
+            if(szFileName[nPrefixLength1+nPrefixLength2] == '/' && szFileName[nPrefixLength1+nPrefixLength2+1] == '/')
+                nPrefixLength2 += 2;
+
+            if(pdwProvider !is null)
+                *pdwProvider = dwProvider;
+            return nPrefixLength1 + nPrefixLength2;
+        }
+    }
+
+    return 0;
+}
+
 //=============================================================================
 package:
 
@@ -82,6 +219,8 @@ version(Posix)
 import std.string;
 import std.algorithm;
 import std.range;
+
+import storm.swapping;
 
 enum INVALID_HANDLE_VALUE = cast(void*)(cast(size_t)-1);
 
@@ -271,7 +410,7 @@ class TFileStream
 class TBlockStream : TFileStream
 {
     SFILE_DOWNLOAD_CALLBACK pfnCallback;    // Callback for downloading
-    void * FileBitmap;                      // Array of bits for file blocks
+    ubyte[] FileBitmap;                     // Array of bits for file blocks
     void * UserData;                        // User data to be passed to the download callback
     uint BitmapSize;                        // Size of the file bitmap (in bytes)
     uint BlockSize;                         // Size of one block, in bytes
@@ -878,7 +1017,7 @@ bool BaseHttp_Open(TFileStream  pStream, string szFileName, uint dwStreamFlags)
                                                           INTERNET_SERVICE_HTTP,
                                                           dwFlags,
                                                           0);
-            if(pStream.Base.Http.hConnect == null)
+            if(pStream.Base.Http.hConnect is null)
                 nError = GetLastError();
         }
     
@@ -1038,6 +1177,367 @@ void BaseHttp_Init(TFileStream pStream)
 
     // HTTP files are read-only
     pStream.dwFlags |= STREAM_FLAG_READ_ONLY;
+}
+
+//-----------------------------------------------------------------------------
+// Local functions - flat stream support
+
+uint FlatStream_CheckFile(TBlockStream pStream)
+{
+    ubyte[] FileBitmap = pStream.FileBitmap;
+    uint WholeByteCount = pStream.BlockCount / 8;
+    uint ExtraBitsCount = pStream.BlockCount & 7;
+    ubyte ExpectedValue;
+
+    // Verify the whole bytes - their value must be 0xFF
+    for(uint i = 0; i < WholeByteCount; i++)
+    {
+        if(FileBitmap[i] != 0xFF)
+            return 0;
+    }
+
+    // If there are extra bits, calculate the mask
+    if(ExtraBitsCount != 0)
+    {
+        ExpectedValue = cast(ubyte)((1 << ExtraBitsCount) - 1);
+        if(FileBitmap[WholeByteCount] != ExpectedValue)
+            return 0;
+    }
+
+    // Yes, the file is complete
+    return 1;
+}
+
+bool FlatStream_LoadBitmap(TBlockStream pStream)
+{
+    FILE_BITMAP_FOOTER Footer;
+    ulong ByteOffset; 
+    ubyte[] FileBitmap;
+    uint BlockCount;
+    uint BitmapSize;
+
+    // Do not load the bitmap if we should not have to
+    if(!(pStream.dwFlags & STREAM_FLAG_USE_BITMAP))
+        return false;
+
+    // Only if the size is greater than size of bitmap footer
+    if(pStream.Base.File.FileSize > FILE_BITMAP_FOOTER.sizeof)
+    {
+        // Load the bitmap footer
+        ByteOffset = pStream.Base.File.FileSize - FILE_BITMAP_FOOTER.sizeof;
+        if(pStream.BaseRead(pStream, &ByteOffset, (cast(ubyte*)&Footer)[0 .. FILE_BITMAP_FOOTER.sizeof]))
+        {
+            // Make sure that the array is properly BSWAP-ed
+            BSWAP_ARRAY32_UNSIGNED((cast(ubyte*)&Footer)[0 .. FILE_BITMAP_FOOTER.sizeof]);
+
+            // Verify if there is actually a footer
+            if(Footer.Signature == ID_FILE_BITMAP_FOOTER && Footer.Version == 0x03)
+            {
+                // Get the offset of the bitmap, number of blocks and size of the bitmap
+                ByteOffset = MAKE_OFFSET64(Footer.MapOffsetHi, Footer.MapOffsetLo);
+                BlockCount = cast(uint)(((ByteOffset - 1) / Footer.BlockSize) + 1);
+                BitmapSize = (BlockCount + 7) / 8;
+
+                // Check if the sizes match
+                if(ByteOffset + BitmapSize + FILE_BITMAP_FOOTER.sizeof == pStream.Base.File.FileSize)
+                {
+                    // Allocate space for the bitmap
+                    FileBitmap = new ubyte[BitmapSize];
+                    if(FileBitmap !is null)
+                    {
+                        // Load the bitmap bits
+                        if(!pStream.BaseRead(pStream, &ByteOffset, FileBitmap))
+                        {
+                            return false;
+                        }
+
+                        // Update the stream size
+                        pStream.BuildNumber = Footer.BuildNumber;
+                        pStream.StreamSize = ByteOffset;
+
+                        // Fill the bitmap information
+                        pStream.FileBitmap = FileBitmap;
+                        pStream.BitmapSize = BitmapSize;
+                        pStream.BlockSize  = Footer.BlockSize;
+                        pStream.BlockCount = BlockCount;
+                        pStream.IsComplete = FlatStream_CheckFile(pStream);
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+void FlatStream_UpdateBitmap(
+    TBlockStream pStream,                // Pointer to an open stream
+    ulong StartOffset,
+    ulong EndOffset)
+{
+    ubyte[] FileBitmap = pStream.FileBitmap;
+    uint BlockIndex;
+    uint BlockSize = pStream.BlockSize;
+    uint ByteIndex;
+    ubyte BitMask;
+
+    // Sanity checks
+    assert((StartOffset & (BlockSize - 1)) == 0);
+    assert(FileBitmap !is null);
+
+    // Calculate the index of the block
+    BlockIndex = cast(uint)(StartOffset / BlockSize);
+    ByteIndex = BlockIndex / 0x08;
+    BitMask = cast(ubyte)(1 << (BlockIndex & 0x07));
+
+    // Set all bits for the specified range
+    while(StartOffset < EndOffset)
+    {
+        // Set the bit
+        FileBitmap[ByteIndex] |= BitMask;
+
+        // Move all
+        StartOffset += BlockSize;
+        ByteIndex += (BitMask >> 0x07);
+        BitMask = cast(ubyte)((BitMask >> 0x07) | (BitMask << 0x01));
+    }
+
+    // Increment the bitmap update count
+    pStream.IsModified = 1;
+}
+
+bool FlatStream_BlockCheck(
+    TBlockStream pStream,                // Pointer to an open stream
+    ulong BlockOffset)
+{
+    ubyte[] FileBitmap = pStream.FileBitmap;
+    uint BlockIndex;
+    ubyte BitMask;
+
+    // Sanity checks
+    assert((BlockOffset & (pStream.BlockSize - 1)) == 0);
+    assert(FileBitmap !is null);
+    
+    // Calculate the index of the block
+    BlockIndex = cast(uint)(BlockOffset / pStream.BlockSize);
+    BitMask = cast(ubyte)(1 << (BlockIndex & 0x07));
+
+    // Check if the bit is present
+    return (FileBitmap[BlockIndex / 0x08] & BitMask) ? true : false;
+}
+
+bool FlatStream_BlockRead(
+    TBlockStream pStream,                // Pointer to an open stream
+    ulong StartOffset,
+    ulong EndOffset,
+    ubyte[] BlockBuffer,
+    bool bAvailable)
+{
+    uint BytesToRead = cast(uint)(EndOffset - StartOffset);
+
+    // The starting offset must be aligned to size of the block
+    assert(pStream.FileBitmap !is null);
+    assert((StartOffset & (pStream.BlockSize - 1)) == 0);
+    assert(StartOffset < EndOffset);
+
+    // If the blocks are not available, we need to load them from the master
+    // and then save to the mirror
+    if(bAvailable == false)
+    {
+        // If we have no master, we cannot satisfy read request
+        if(pStream.pMaster is null)
+            return false;
+
+        // Load the blocks from the master stream
+        // Note that we always have to read complete blocks
+        // so they get properly stored to the mirror stream
+        if(!FileStream_Read(pStream.pMaster, &StartOffset, BlockBuffer[0..BytesToRead]))
+            return false;
+
+        // Store the loaded blocks to the mirror file.
+        // Note that this operation is not required to succeed
+        if(pStream.BaseWrite(pStream, &StartOffset, BlockBuffer[0..BytesToRead]))
+            FlatStream_UpdateBitmap(pStream, StartOffset, EndOffset);
+
+        return true;
+    }
+    else
+    {
+        if(BytesToRead > BlockBuffer.length)
+            BytesToRead = cast(uint)BlockBuffer.length;
+        return pStream.BaseRead(pStream, &StartOffset, BlockBuffer[0..BytesToRead]);
+    }
+}
+
+void FlatStream_Close(TBlockStream pStream)
+{
+    FILE_BITMAP_FOOTER Footer;
+
+    if(pStream.FileBitmap && pStream.IsModified)
+    {
+        // Write the file bitmap
+        pStream.BaseWrite(pStream, &pStream.StreamSize, pStream.FileBitmap);
+        
+        // Prepare and write the file footer
+        Footer.Signature   = ID_FILE_BITMAP_FOOTER;
+        Footer.Version     = 3;
+        Footer.BuildNumber = pStream.BuildNumber;
+        Footer.MapOffsetLo = cast(uint)(pStream.StreamSize & 0xFFFFFFFF);
+        Footer.MapOffsetHi = cast(uint)(pStream.StreamSize >> 0x20);
+        Footer.BlockSize   = pStream.BlockSize;
+        
+        BSWAP_ARRAY32_UNSIGNED((cast(ubyte*)&Footer)[0..FILE_BITMAP_FOOTER.sizeof]);
+        pStream.BaseWrite(pStream, null, (cast(ubyte*)&Footer)[0..FILE_BITMAP_FOOTER.sizeof]);
+    }
+
+    // Close the base class
+    BlockStream_Close(pStream);
+}
+
+bool FlatStream_CreateMirror(TBlockStream pStream)
+{
+    ulong MasterSize = 0;
+    ulong MirrorSize = 0;
+    ubyte[] FileBitmap;
+    uint dwBitmapSize;
+    uint dwBlockCount;
+    bool bNeedCreateMirrorStream = true;
+    bool bNeedResizeMirrorStream = true;
+
+    // Do we have master function and base creation function?
+    if(pStream.pMaster is null || pStream.BaseCreate is null)
+        return false;
+
+    // Retrieve the master file size, block count and bitmap size
+    FileStream_GetSize(pStream.pMaster, MasterSize);
+    dwBlockCount = cast(uint)((MasterSize + DEFAULT_BLOCK_SIZE - 1) / DEFAULT_BLOCK_SIZE);
+    dwBitmapSize = cast(uint)((dwBlockCount + 7) / 8);
+
+    // Setup stream size and position
+    pStream.BuildNumber = DEFAULT_BUILD_NUMBER;        // BUGBUG: Really???
+    pStream.StreamSize = MasterSize;
+    pStream.StreamPos = 0;
+
+    // Open the base stream for write access
+    if(pStream.BaseOpen(pStream, pStream.szFileName, 0))
+    {
+        // If the file open succeeded, check if the file size matches required size
+        pStream.BaseGetSize(pStream, MirrorSize);
+        if(MirrorSize == MasterSize + dwBitmapSize + FILE_BITMAP_FOOTER.sizeof)
+        {
+            // Attempt to load an existing file bitmap
+            if(FlatStream_LoadBitmap(pStream))
+                return true;
+
+            // We need to create new file bitmap
+            bNeedResizeMirrorStream = false;
+        }
+
+        // We need to create mirror stream
+        bNeedCreateMirrorStream = false;
+    }
+
+    // Create a new stream, if needed
+    if(bNeedCreateMirrorStream)
+    {
+        if(!pStream.BaseCreate(pStream))
+            return false;
+    }
+
+    // If we need to, then resize the mirror stream
+    if(bNeedResizeMirrorStream)
+    {
+        if(!pStream.BaseResize(pStream, MasterSize + dwBitmapSize + FILE_BITMAP_FOOTER.sizeof))
+            return false;
+    }
+
+    // Allocate the bitmap array
+    FileBitmap = new ubyte[dwBitmapSize];
+
+    // Initialize the bitmap
+    pStream.FileBitmap = FileBitmap;
+    pStream.BitmapSize = dwBitmapSize;
+    pStream.BlockSize  = DEFAULT_BLOCK_SIZE;
+    pStream.BlockCount = dwBlockCount;
+    pStream.IsComplete = 0;
+    pStream.IsModified = 1;
+
+    // Note: Don't write the stream bitmap right away.
+    // Doing so would cause sparse file resize on NTFS,
+    // which would take long time on larger files.
+    return true;
+}
+
+TFileStream FlatStream_Open(string szFileName, uint dwStreamFlags)
+{
+    TBlockStream  pStream;    
+    ulong ByteOffset = 0;
+
+    // Create new empty stream
+    pStream = cast(TBlockStream)AllocateFileStream(szFileName, dwStreamFlags);
+    if(pStream is null)
+        return null;
+
+    // Do we have a master stream?
+    if(pStream.pMaster !is null)
+    {
+        if(!FlatStream_CreateMirror(pStream))
+        {
+            FileStream_Close(pStream);
+            SetLastError(ERROR_FILE_NOT_FOUND);
+            return null;
+        }
+    }
+    else
+    {
+        // Attempt to open the base stream
+        if(!pStream.BaseOpen(pStream, pStream.szFileName, dwStreamFlags))
+            return null;
+
+        // Load the bitmap, if required to
+        if(dwStreamFlags & STREAM_FLAG_USE_BITMAP)
+            FlatStream_LoadBitmap(pStream);
+    }
+
+    // If we have a stream bitmap, set the reading functions
+    // which check presence of each file block
+    if(pStream.FileBitmap !is null)
+    {
+        // Set the stream position to zero. Stream size is already set
+        assert(pStream.StreamSize != 0);
+        pStream.StreamPos = 0;
+        pStream.dwFlags |= STREAM_FLAG_READ_ONLY;
+
+        // Supply the stream functions
+        pStream.StreamRead    = cast(STREAM_READ)&BlockStream_Read;
+        pStream.StreamGetSize = &BlockStream_GetSize;
+        pStream.StreamGetPos  = &BlockStream_GetPos;
+        pStream.StreamClose   = cast(STREAM_CLOSE)&FlatStream_Close;
+
+        // Supply the block functions
+        pStream.BlockCheck    = cast(BLOCK_CHECK)&FlatStream_BlockCheck;
+        pStream.BlockRead     = cast(BLOCK_READ)&FlatStream_BlockRead;
+    }
+    else
+    {
+        // Reset the base position to zero
+        pStream.BaseRead(pStream, &ByteOffset, null);
+
+        // Setup stream size and position
+        pStream.StreamSize = pStream.Base.File.FileSize;
+        pStream.StreamPos = 0;
+
+        // Set the base functions
+        pStream.StreamRead    = pStream.BaseRead;
+        pStream.StreamWrite   = pStream.BaseWrite;
+        pStream.StreamResize  = pStream.BaseResize;
+        pStream.StreamGetSize = pStream.BaseGetSize;
+        pStream.StreamGetPos  = pStream.BaseGetPos;
+        pStream.StreamClose   = pStream.BaseClose;
+    }
+
+    return pStream;
 }
 
 //-----------------------------------------------------------------------------

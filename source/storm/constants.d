@@ -352,3 +352,9 @@ enum ERROR_STRONG_SIGNATURE_ERROR       = 5;
 enum MD5_DIGEST_SIZE                   = 0x10;
 enum SHA1_DIGEST_SIZE                  = 0x14;  // 160 bits
 enum LANG_NEUTRAL                      = 0x00;  // Neutral locale
+
+/// Macro for building 64-bit file offset from two 32-bit
+ulong MAKE_OFFSET64(uint hi, uint lo)
+{
+    return (cast(ulong)hi << 32) | cast(ulong)lo;
+}
