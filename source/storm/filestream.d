@@ -802,6 +802,245 @@ void BaseMap_Init(TFileStream pStream)
 }
 
 //-----------------------------------------------------------------------------
+// Local functions - base HTTP file support
+/// TODO: Add support for CURL for Posix platform!
+
+string BaseHttp_ExtractServerName(string szFileName, out string szServerName)
+{
+    // Check for HTTP
+    if(!szFileName.find("http://").empty)
+        szFileName = szFileName[8..$];
+
+    // Cut off the server name
+    if(szServerName != "")
+    {
+        auto i = szFileName.countUntil('/');
+        if(i > 0)
+        {
+           szServerName = szFileName[0..i];
+           szFileName = szFileName[i..$];
+        }
+    }
+    else
+    {
+        auto i = szFileName.countUntil('/');
+        if(i > 0)
+        {
+           szFileName = szFileName[i..$];
+        }
+    }
+
+    // Return the remainder
+    return szFileName;
+}
+
+bool BaseHttp_Open(TFileStream  pStream, string szFileName, uint dwStreamFlags)
+{
+    version(Windows)
+    {
+        HINTERNET hRequest;
+        DWORD dwTemp = 0;
+        bool bFileAvailable = false;
+        int nError = ERROR_SUCCESS;
+    
+        // Keep compiler happy
+        dwStreamFlags = dwStreamFlags;
+    
+        // Don't connect to the internet
+        if(!InternetGetConnectedState(&dwTemp, 0))
+            nError = GetLastError();
+    
+        // Initiate the connection to the internet
+        if(nError == ERROR_SUCCESS)
+        {
+            pStream.Base.Http.hInternet = InternetOpen(_T("StormLib HTTP MPQ reader"),
+                                                        INTERNET_OPEN_TYPE_PRECONFIG,
+                                                        null,
+                                                        null,
+                                                        0);
+            if(pStream.Base.Http.hInternet is null)
+                nError = GetLastError();
+        }
+    
+        // Connect to the server
+        if(nError == ERROR_SUCCESS)
+        {
+            string szServerName;
+            DWORD dwFlags = INTERNET_FLAG_KEEP_CONNECTION | INTERNET_FLAG_NO_UI | INTERNET_FLAG_NO_CACHE_WRITE;
+    
+            // Initiate connection with the server
+            szFileName = BaseHttp_ExtractServerName(szFileName, szServerName);
+            pStream.Base.Http.hConnect = InternetConnect(pStream.Base.Http.hInternet,
+                                                          szServerName.toStringz,
+                                                          INTERNET_DEFAULT_HTTP_PORT,
+                                                          null,
+                                                          null,
+                                                          INTERNET_SERVICE_HTTP,
+                                                          dwFlags,
+                                                          0);
+            if(pStream.Base.Http.hConnect == null)
+                nError = GetLastError();
+        }
+    
+        // Now try to query the file size
+        if(nError == ERROR_SUCCESS)
+        {
+            // Open HTTP request to the file
+            hRequest = HttpOpenRequest(pStream.Base.Http.hConnect, "GET".toStringz, szFileName.toStringz, null, null, null, INTERNET_FLAG_NO_CACHE_WRITE, 0);
+            if(hRequest !is null)
+            {
+                if(HttpSendRequest(hRequest, null, 0, null, 0))
+                {
+                    ULONGLONG FileTime = 0;
+                    DWORD dwFileSize = 0;
+                    DWORD dwDataSize;
+                    DWORD dwIndex = 0;
+    
+                    // Check if the MPQ has Last Modified field
+                    dwDataSize = cast(DWORD)ULONGLONG.sizeof;
+                    if(HttpQueryInfo(hRequest, HTTP_QUERY_LAST_MODIFIED | HTTP_QUERY_FLAG_SYSTEMTIME, &FileTime, &dwDataSize, &dwIndex))
+                        pStream.Base.Http.FileTime = FileTime;
+    
+                    // Verify if the server supports random access
+                    dwDataSize = cast(DWORD)DWORD.sizeof;
+                    if(HttpQueryInfo(hRequest, HTTP_QUERY_CONTENT_LENGTH | HTTP_QUERY_FLAG_NUMBER, &dwFileSize, &dwDataSize, &dwIndex))
+                    {
+                        if(dwFileSize != 0)
+                        {
+                            pStream.Base.Http.FileSize = dwFileSize;
+                            pStream.Base.Http.FilePos = 0;
+                            bFileAvailable = true;
+                        }
+                    }
+                }
+                InternetCloseHandle(hRequest);
+            }
+        }
+    
+        // If the file is not there and is not available for random access,
+        // report error
+        if(bFileAvailable == false)
+        {
+            pStream.BaseClose(pStream);
+            return false;
+        }
+    
+        return true;
+    
+    }
+    else
+    {
+        // Not supported
+        SetLastError(ERROR_NOT_SUPPORTED);
+        pStream = pStream;
+        return false;
+    }
+}
+
+bool BaseHttp_Read(
+    TFileStream pStream,                     // Pointer to an open stream
+    ulong * pByteOffset,                     // Pointer to file byte offset. If null, it reads from the current position
+    ubyte[] pbBuffer)                        // Pointer to data to be read
+{
+    version(Windows)
+    {
+        ULONGLONG ByteOffset = (pByteOffset !is null) ? *pByteOffset : pStream.Base.Http.FilePos;
+        DWORD dwTotalBytesRead = 0;
+    
+        // Do we have to read anything at all?
+        if(pbBuffer.length != 0)
+        {
+            HINTERNET hRequest;
+            LPCTSTR szFileName;
+            char[0x80] szRangeRequest;
+            DWORD dwStartOffset = cast(DWORD)ByteOffset;
+            DWORD dwEndOffset = dwStartOffset + pbBuffer.length;
+    
+            // Open HTTP request to the file
+            szFileName = BaseHttp_ExtractServerName(pStream.szFileName, "");
+            hRequest = HttpOpenRequest(pStream.Base.Http.hConnect, "GET".toStringz, szFileName.toStringz, null, null, null, INTERNET_FLAG_NO_CACHE_WRITE, 0);
+            if(hRequest !is null)
+            {
+                // Add range request to the HTTP headers
+                // http://www.clevercomponents.com/articles/article015/resuming.asp
+                _stprintf(szRangeRequest, "Range: bytes=%u-%u".toStringz, cast(uint)dwStartOffset, cast(uint)dwEndOffset);
+                HttpAddRequestHeaders(hRequest, szRangeRequest.ptr, 0xFFFFFFFF, HTTP_ADDREQ_FLAG_ADD_IF_NEW); 
+    
+                // Send the request to the server
+                if(HttpSendRequest(hRequest, null, 0, null, 0))
+                {
+                    while(dwTotalBytesRead < pbBuffer.length)
+                    {
+                        DWORD dwBlockBytesToRead = pbBuffer.length - dwTotalBytesRead;
+                        DWORD dwBlockBytesRead = 0;
+    
+                        // Read the block from the file
+                        if(dwBlockBytesToRead > 0x200)
+                            dwBlockBytesToRead = 0x200;
+                        InternetReadFile(hRequest, pbBuffer, dwBlockBytesToRead, &dwBlockBytesRead);
+    
+                        // Check for end
+                        if(dwBlockBytesRead == 0)
+                            break;
+    
+                        // Move buffers
+                        dwTotalBytesRead += dwBlockBytesRead;
+                        pbBuffer += dwBlockBytesRead;
+                    }
+                }
+                InternetCloseHandle(hRequest);
+            }
+        }
+    
+        // Increment the current file position by number of bytes read
+        pStream.Base.Http.FilePos = ByteOffset + dwTotalBytesRead;
+    
+        // If the number of bytes read doesn't match the required amount, return false
+        if(dwTotalBytesRead != pbBuffer.length)
+            SetLastError(ERROR_HANDLE_EOF);
+        return (dwTotalBytesRead == pbBuffer.length);
+    }
+    else
+    {
+        // Not supported
+        SetLastError(ERROR_NOT_SUPPORTED);
+        return false;
+    }
+}
+
+void BaseHttp_Close(TFileStream pStream)
+{
+    version(Windows)
+    {
+        if(pStream.Base.Http.hConnect !is null)
+            InternetCloseHandle(pStream.Base.Http.hConnect);
+        pStream.Base.Http.hConnect = null;
+    
+        if(pStream.Base.Http.hInternet !is null)
+            InternetCloseHandle(pStream.Base.Http.hInternet);
+        pStream.Base.Http.hInternet = null;
+    }
+    else
+    {
+        pStream = pStream;
+    }
+}
+
+// Initializes base functions for the mapped file
+void BaseHttp_Init(TFileStream pStream)
+{
+    // Supply the stream functions
+    pStream.BaseOpen    = &BaseHttp_Open;
+    pStream.BaseRead    = &BaseHttp_Read;
+    pStream.BaseGetSize = &BaseFile_GetSize;    // Reuse BaseFile function
+    pStream.BaseGetPos  = &BaseFile_GetPos;     // Reuse BaseFile function
+    pStream.BaseClose   = &BaseHttp_Close;
+
+    // HTTP files are read-only
+    pStream.dwFlags |= STREAM_FLAG_READ_ONLY;
+}
+
+//-----------------------------------------------------------------------------
 // File stream allocation function
 
 static STREAM_INIT StreamBaseInit[4] =
