@@ -9,6 +9,23 @@ import storm.callback;
 import storm.constants;
 import storm.errors;
 
+/// Structure used by FileStream_GetBitmap
+struct TStreamBitmap
+{
+    /// Size of the stream, in bytes
+    ulong StreamSize;                       
+    /// Size of the block map, in bytes
+    uint BitmapSize;                           
+    /// Number of blocks in the stream
+    uint BlockCount;                           
+    /// Size of one block
+    uint BlockSize;                            
+    /// Nonzero if the file is complete
+    uint IsComplete;                           
+
+    // Followed by the BYTE array, each bit means availability of one block
+}
+
 /**
 *   This function creates a new file for read-write access
 *
@@ -40,7 +57,7 @@ TFileStream FileStream_CreateFile(
     }
 
     // Allocate file stream structure for flat stream
-    pStream = AllocateFileStream(szFileName, dwStreamFlags);
+    pStream = AllocateFileStream!TFileStream(szFileName, dwStreamFlags);
     if(pStream !is null)
     {
         // Attempt to create the disk file
@@ -201,6 +218,319 @@ size_t FileStream_Prefix(string szFileName, uint * pdwProvider)
     return 0;
 }
 
+/**
+*   Sets a download callback. Whenever the stream needs to download one or more blocks
+*   from the server, the callback is called
+*
+*   Params:
+*       pStream     Pointer to an open stream
+*       pfnCallback Pointer to callback function
+*       pvUserData  Arbitrary user pointer passed to the download callback
+*/
+bool FileStream_SetCallback(TFileStream pStream, SFILE_DOWNLOAD_CALLBACK pfnCallback, void * pvUserData)
+{
+    TBlockStream  pBlockStream = cast(TBlockStream)pStream;
+    assert(pBlockStream !is null);
+    
+    if(pStream.BlockRead is null)
+    {
+        SetLastError(ERROR_NOT_SUPPORTED);
+        return false;
+    }
+
+    pBlockStream.pfnCallback = pfnCallback;
+    pBlockStream.UserData = pvUserData;
+    return true;
+}
+
+/**
+*   This function gives the block map. The 'pvBitmap' pointer must point to a buffer
+*   of at least sizeof(STREAM_BLOCK_MAP) size. It can also have size of the complete
+*   block map (i.e. sizeof(STREAM_BLOCK_MAP) + BitmapSize). In that case, the function
+*   also copies the bit-based block map.
+*
+*   Params:
+*       pStream         Pointer to an open stream
+*       pvBitmap        Pointer to buffer where the block map will be stored
+*       cbLengthNeeded  Length of the bitmap, in bytes
+*/
+bool FileStream_GetBitmap(TFileStream pStream, ubyte[] pvBitmap, out size_t pcbLengthNeeded)
+{
+    TStreamBitmap* pBitmap = cast(TStreamBitmap*)pvBitmap.ptr;
+    TBlockStream pBlockStream = cast(TBlockStream)pStream;
+    assert(pBlockStream !is null);
+    ulong BlockOffset;
+    ubyte* Bitmap = cast(ubyte*)(pBitmap + 1);
+    uint BitmapSize;
+    uint BlockCount;
+    uint BlockSize;
+    bool bResult = false;
+
+    // Retrieve the size of one block
+    if(pStream.BlockCheck !is null)
+    {
+        BlockCount = pBlockStream.BlockCount;
+        BlockSize = pBlockStream.BlockSize;
+    }
+    else
+    {
+        BlockCount = cast(uint)((pStream.StreamSize + DEFAULT_BLOCK_SIZE - 1) / DEFAULT_BLOCK_SIZE);
+        BlockSize = DEFAULT_BLOCK_SIZE;
+    }
+
+    // Fill-in the variables
+    BitmapSize = (BlockCount + 7) / 8;
+
+    // Give the number of blocks
+    pcbLengthNeeded = TStreamBitmap.sizeof + BitmapSize;
+
+    // If the length of the buffer is not enough
+    if(pvBitmap !is null && pvBitmap.length != 0)
+    {
+        // Give the STREAM_BLOCK_MAP structure
+        if(pvBitmap.length >= TStreamBitmap.sizeof)
+        {
+            pBitmap.StreamSize = pStream.StreamSize;
+            pBitmap.BitmapSize = BitmapSize;
+            pBitmap.BlockCount = BlockCount;
+            pBitmap.BlockSize  = BlockSize;
+            pBitmap.IsComplete = (pStream.BlockCheck !is null) ? pBlockStream.IsComplete : 1;
+            bResult = true;
+        }
+
+        // Give the block bitmap, if enough space
+        if(pvBitmap.length >= TStreamBitmap.sizeof + BitmapSize)
+        {
+            // Version with bitmap present
+            if(pStream.BlockCheck !is null)
+            {
+                uint ByteIndex = 0;
+                ubyte BitMask = 0x01;
+
+                // Initialize the map with zeros
+                Bitmap[0 .. BitmapSize] = 0;
+
+                // Fill the map
+                for(BlockOffset = 0; BlockOffset < pStream.StreamSize; BlockOffset += BlockSize)
+                {
+                    // Set the bit if the block is present
+                    if(pBlockStream.BlockCheck(pStream, BlockOffset))
+                        Bitmap[ByteIndex] |= BitMask;
+
+                    // Move bit position
+                    ByteIndex += (BitMask >> 0x07);
+                    BitMask = cast(ubyte)((BitMask >> 0x07) | (BitMask << 0x01));
+                }
+            }
+            else
+            {
+                Bitmap[0 .. BitmapSize] = 0xFF;
+            }
+        }
+    }
+
+    // Set last error value and return
+    if(bResult == false)
+        SetLastError(ERROR_INSUFFICIENT_BUFFER);
+    return bResult;
+}
+
+/**
+*   Reads data from the stream
+*
+*   - Returns true if the read operation succeeded and all bytes have been read
+*   - Returns false if either read failed or not all bytes have been read
+*   - If the pByteOffset is null, the function must read the data from the current file position
+*   - The function can be called with dwBytesToRead = 0. In that case, pvBuffer is ignored
+*     and the function just adjusts file pointer.
+*
+*   Params:
+*       pStream         Pointer to an open stream
+*       pByteOffset     Pointer to file byte offset. If null, it reads from the current position
+*       pvBuffer        Pointer to data to be read
+*       dwBytesToRead   Number of bytes to read from the file
+*
+*   Returns:
+*   - If the function reads the required amount of bytes, it returns true.
+*   - If the function reads less than required bytes, it returns false and GetLastError() returns ERROR_HANDLE_EOF
+*   - If the function fails, it reads false and GetLastError() returns an error code different from ERROR_HANDLE_EOF
+*/
+bool FileStream_Read(TFileStream pStream, ulong * pByteOffset, ubyte[] pvBuffer)
+{
+    assert(pStream.StreamRead !is null);
+    return pStream.StreamRead(pStream, pByteOffset, pvBuffer);
+}
+
+/**
+*   This function writes data to the stream
+*
+*   - Returns true if the write operation succeeded and all bytes have been written
+*   - Returns false if either write failed or not all bytes have been written
+*   - If the pByteOffset is null, the function must write the data to the current file position
+*
+*   Params:
+*       pStream     Pointer to an open stream
+*       pByteOffset Pointer to file byte offset. If null, it reads from the current position
+*       pvBuffer    Pointer to data to be written
+*/
+bool FileStream_Write(TFileStream pStream, ulong* pByteOffset, const ubyte[] pbBuffer)
+{
+    if(pStream.dwFlags & STREAM_FLAG_READ_ONLY)
+    {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return false;
+    }
+
+    assert(pStream.StreamWrite !is null);
+    return pStream.StreamWrite(pStream, pByteOffset, pbBuffer);
+}
+
+/**
+*   Returns the size of a file
+*   
+*   Params:
+*       pStream     Pointer to an open stream
+*       FileSize    Pointer where to store the file size
+*/
+bool FileStream_GetSize(TFileStream pStream, out ulong pFileSize)
+{
+    assert(pStream.StreamGetSize !is null);
+    return pStream.StreamGetSize(pStream, pFileSize);
+}
+
+/**
+*   Sets the size of a file
+*
+*   Params:
+*       pStream     Pointer to an open stream
+*       NewFileSize File size to set
+*/
+bool FileStream_SetSize(TFileStream pStream, ulong NewFileSize)
+{                                 
+    if(pStream.dwFlags & STREAM_FLAG_READ_ONLY)
+    {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return false;
+    }
+
+    assert(pStream.StreamResize !is null);
+    return pStream.StreamResize(pStream, NewFileSize);
+}
+
+/**
+*   This function returns the current file position.
+*
+*   Params:
+*       pStream
+*       pByteOffset
+*/
+bool FileStream_GetPos(TFileStream pStream, out ulong pByteOffset)
+{
+    assert(pStream.StreamGetPos !is null);
+    return pStream.StreamGetPos(pStream, pByteOffset);
+}
+
+/**
+*   Returns the last write time of a file
+*
+*   Params:
+*       pStream     Pointer to an open stream
+*       pFileType   Pointer where to store the file last write time
+*/
+bool FileStream_GetTime(TFileStream pStream, out ulong pFileTime)
+{
+    // Just use the saved filetime value
+    pFileTime = pStream.Base.File.FileTime;
+    return true;
+}
+
+/**
+*   Returns the stream flags
+*
+*   Params:
+*       pStream         Pointer to an open stream
+*       pdwStreamFlags  Pointer where to store the stream flags
+*/
+bool FileStream_GetFlags(TFileStream pStream, out uint pdwStreamFlags)
+{
+    pdwStreamFlags = pStream.dwFlags;
+    return true;
+}
+
+/**
+*   Switches a stream with another. Used for final phase of archive compacting.
+*   Performs these steps:
+*
+*   1) Closes the handle to the existing MPQ
+*   2) Renames the temporary MPQ to the original MPQ, overwrites existing one
+*   3) Opens the MPQ stores the handle and stream position to the new stream structure
+*
+*   Params:
+*       pStream     Pointer to an open stream
+*       pNewStream  Temporary ("working") stream (created during archive compacting)
+*/
+bool FileStream_Replace(TFileStream pStream, TFileStream pNewStream)
+{
+    // Only supported on flat files
+    if((pStream.dwFlags & STREAM_PROVIDERS_MASK) != (STREAM_PROVIDER_FLAT | BASE_PROVIDER_FILE))
+    {
+        SetLastError(ERROR_NOT_SUPPORTED);
+        return false;
+    }
+
+    // Not supported on read-only streams
+    if(pStream.dwFlags & STREAM_FLAG_READ_ONLY)
+    {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return false;
+    }
+
+    // Close both stream's base providers
+    pNewStream.BaseClose(pNewStream);
+    pStream.BaseClose(pStream);
+
+    // Now we have to delete the (now closed) old file and rename the new file
+    if(!BaseFile_Replace(pStream, pNewStream))
+        return false;
+
+    // Now open the base file again
+    if(!BaseFile_Open(pStream, pStream.szFileName, pStream.dwFlags))
+        return false;
+
+    // Cleanup the new stream
+    FileStream_Close(pNewStream);
+    return true;
+}
+
+/**
+*   This function closes an archive file and frees any data buffers
+*   that have been allocated for stream management. The function must also
+*   support partially allocated structure, i.e. one or more buffers
+*   can be null, if there was an allocation failure during the process
+*
+*   Params:
+*       pStream     Pointer to an open stream
+*/
+void FileStream_Close(TFileStream pStream)
+{
+    // Check if the stream structure is allocated at all
+    if(pStream !is null)
+    {
+        // Free the master stream, if any
+        if(pStream.pMaster !is null)
+            FileStream_Close(pStream.pMaster);
+        pStream.pMaster = null;
+
+        // Close the stream provider.
+        if(pStream.StreamClose !is null)
+            pStream.StreamClose(pStream);
+        
+        // Also close base stream, if any
+        else if(pStream.BaseClose !is null)
+            pStream.BaseClose(pStream);
+    }
+}
+
 //=============================================================================
 package:
 
@@ -219,6 +549,7 @@ version(Posix)
 import std.string;
 import std.algorithm;
 import std.range;
+import std.conv;
 
 import storm.swapping;
 
@@ -1475,7 +1806,7 @@ TFileStream FlatStream_Open(string szFileName, uint dwStreamFlags)
     ulong ByteOffset = 0;
 
     // Create new empty stream
-    pStream = cast(TBlockStream)AllocateFileStream(szFileName, dwStreamFlags);
+    pStream = AllocateFileStream!TBlockStream(szFileName, dwStreamFlags);
     if(pStream is null)
         return null;
 
@@ -1541,6 +1872,407 @@ TFileStream FlatStream_Open(string szFileName, uint dwStreamFlags)
 }
 
 //-----------------------------------------------------------------------------
+// Local functions - partial stream support
+
+bool IsPartHeader(ref PART_FILE_HEADER pPartHdr)
+{
+    bool isdigit(dchar c)
+    {
+        return '0' <= c && c <= '9'; 
+    }
+    
+    // Version number must be 2
+    if(pPartHdr.PartialVersion == 2)
+    {
+        // GameBuildNumber must be an ASCII number
+        if(isdigit(pPartHdr.GameBuildNumber[0]) && isdigit(pPartHdr.GameBuildNumber[1]) && isdigit(pPartHdr.GameBuildNumber[2]))
+        {
+            // Block size must be power of 2
+            if((pPartHdr.BlockSize & (pPartHdr.BlockSize - 1)) == 0)
+                return true;
+        }
+    }
+
+    return false;
+}
+
+uint PartStream_CheckFile(TBlockStream pStream)
+{
+    PART_FILE_MAP_ENTRY[] FileBitmap = cast(PART_FILE_MAP_ENTRY[])pStream.FileBitmap;
+    size_t dwBlockCount;
+
+    // Get the number of blocks
+    dwBlockCount = cast(size_t)((pStream.StreamSize + pStream.BlockSize - 1) / pStream.BlockSize);
+    assert(FileBitmap.length == dwBlockCount);
+    
+    // Check all blocks
+    foreach(ref block; FileBitmap)
+    {
+        // Few sanity checks
+        assert(block.LargeValueHi == 0);
+        assert(block.LargeValueLo == 0);
+        assert(block.Flags == 0 || block.Flags == 3);
+
+        // Check if this block is present
+        if(block.Flags != 3)
+            return 0;
+    }
+
+    // Yes, the file is complete
+    return 1;
+}
+
+bool PartStream_LoadBitmap(TBlockStream pStream)
+{
+    PART_FILE_MAP_ENTRY[] FileBitmap;
+    PART_FILE_HEADER PartHdr;
+    ulong ByteOffset = 0;
+    ulong StreamSize = 0;
+    uint BlockCount;
+    uint BitmapSize;
+
+    // Only if the size is greater than size of the bitmap header
+    if(pStream.Base.File.FileSize > PART_FILE_HEADER.sizeof)
+    {
+        // Attempt to read PART file header
+        if(pStream.BaseRead(pStream, &ByteOffset, (cast(ubyte*)&PartHdr)[0 .. PART_FILE_HEADER.sizeof]))
+        {
+            // We need to swap PART file header on big-endian platforms
+            BSWAP_ARRAY32_UNSIGNED((cast(ubyte*)&PartHdr)[0 .. PART_FILE_HEADER.sizeof]);
+
+            // Verify the PART file header
+            if(IsPartHeader(PartHdr))
+            {
+                // Get the number of blocks and size of one block
+                StreamSize = MAKE_OFFSET64(PartHdr.FileSizeHi, PartHdr.FileSizeLo);
+                ByteOffset = PART_FILE_HEADER.sizeof;
+                BlockCount = cast(uint)((StreamSize + PartHdr.BlockSize - 1) / PartHdr.BlockSize);
+                BitmapSize = cast(uint)(BlockCount * PART_FILE_MAP_ENTRY.sizeof);
+
+                // Check if sizes match
+                if((ByteOffset + BitmapSize) < pStream.Base.File.FileSize)
+                {
+                    // Allocate space for the array of PART_FILE_MAP_ENTRY
+                    FileBitmap = new PART_FILE_MAP_ENTRY[cast(size_t)BlockCount];
+                    if(FileBitmap !is null)
+                    {
+                        // Load the block map
+                        if(!pStream.BaseRead(pStream, &ByteOffset, cast(ubyte[])FileBitmap))
+                        {
+                            return false;
+                        }
+
+                        // Make sure that the byte order is correct
+                        BSWAP_ARRAY32_UNSIGNED((cast(ubyte*)FileBitmap.ptr)[0 .. BitmapSize]);
+
+                        // Update the stream size
+                        pStream.BuildNumber = PartHdr.GameBuildNumber.to!uint;
+                        pStream.StreamSize = StreamSize;
+
+                        // Fill the bitmap information
+                        pStream.FileBitmap = cast(ubyte[])FileBitmap;
+                        pStream.BitmapSize = BitmapSize;
+                        pStream.BlockSize  = PartHdr.BlockSize;
+                        pStream.BlockCount = BlockCount;
+                        pStream.IsComplete = PartStream_CheckFile(pStream);
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+void PartStream_UpdateBitmap(
+    TBlockStream pStream,                // Pointer to an open stream
+    ulong StartOffset,
+    ulong EndOffset,
+    ulong RealOffset)
+{
+    PART_FILE_MAP_ENTRY* FileBitmap;
+    uint BlockSize = pStream.BlockSize;
+
+    // Sanity checks
+    assert((StartOffset & (BlockSize - 1)) == 0);
+    assert(pStream.FileBitmap !is null);
+
+    // Calculate the first entry in the block map
+    FileBitmap = cast(PART_FILE_MAP_ENTRY*)pStream.FileBitmap.ptr + cast(size_t)(StartOffset / BlockSize);
+
+    // Set all bits for the specified range
+    while(StartOffset < EndOffset)
+    {
+        // Set the bit
+        FileBitmap.BlockOffsHi = cast(uint)(RealOffset >> 0x20);
+        FileBitmap.BlockOffsLo = cast(uint)(RealOffset & 0xFFFFFFFF);
+        FileBitmap.Flags = 3;
+
+        // Move all
+        StartOffset += BlockSize;
+        RealOffset += BlockSize;
+        FileBitmap++;
+    }
+
+    // Increment the bitmap update count
+    pStream.IsModified = 1;
+}
+
+bool PartStream_BlockCheck(
+    TBlockStream pStream,                // Pointer to an open stream
+    ulong BlockOffset)
+{
+    PART_FILE_MAP_ENTRY* FileBitmap;
+
+    // Sanity checks
+    assert((BlockOffset & (pStream.BlockSize - 1)) == 0);
+    assert(pStream.FileBitmap !is null);
+    
+    // Calculate the block map entry
+    FileBitmap = cast(PART_FILE_MAP_ENTRY*)pStream.FileBitmap.ptr + cast(size_t)(BlockOffset / pStream.BlockSize);
+
+    // Check if the flags are present
+    return (FileBitmap.Flags & 0x03) ? true : false;
+}
+
+bool PartStream_BlockRead(
+    TBlockStream pStream,
+    ulong StartOffset,
+    ulong EndOffset,
+    ubyte[] BlockBuffer,
+    bool bAvailable)
+{
+    PART_FILE_MAP_ENTRY* FileBitmap;
+    ulong ByteOffset;
+    size_t BytesToRead;
+    uint BlockIndex = cast(uint)(StartOffset / pStream.BlockSize);
+
+    // The starting offset must be aligned to size of the block
+    assert(pStream.FileBitmap !is null);
+    assert((StartOffset & (pStream.BlockSize - 1)) == 0);
+    assert(StartOffset < EndOffset);
+
+    // If the blocks are not available, we need to load them from the master
+    // and then save to the mirror
+    if(bAvailable == false)
+    {
+        // If we have no master, we cannot satisfy read request
+        if(pStream.pMaster is null)
+            return false;
+
+        // Load the blocks from the master stream
+        // Note that we always have to read complete blocks
+        // so they get properly stored to the mirror stream
+        BytesToRead = cast(size_t)(EndOffset - StartOffset);
+        if(!FileStream_Read(pStream.pMaster, &StartOffset, BlockBuffer[0 .. BytesToRead]))
+            return false;
+
+        // The loaded blocks are going to be stored to the end of the file
+        // Note that this operation is not required to succeed
+        if(pStream.BaseGetSize(pStream, ByteOffset))
+        {
+            // Store the loaded blocks to the mirror file.
+            if(pStream.BaseWrite(pStream, &ByteOffset, BlockBuffer[0 .. BytesToRead]))
+            {
+                PartStream_UpdateBitmap(pStream, StartOffset, EndOffset, ByteOffset);
+            }
+        }
+    }
+    else
+    {
+        // Get the file map entry
+        FileBitmap = cast(PART_FILE_MAP_ENTRY*)pStream.FileBitmap.ptr + cast(size_t)BlockIndex;
+
+        // Read all blocks
+        while(StartOffset < EndOffset)
+        {
+            // Get the number of bytes to be read
+            BytesToRead = cast(uint)(EndOffset - StartOffset);
+            if(BytesToRead > pStream.BlockSize)
+                BytesToRead = pStream.BlockSize;
+            if(BytesToRead > BlockBuffer.length)
+                BytesToRead = BlockBuffer.length;
+
+            // Read the block
+            ByteOffset = MAKE_OFFSET64(FileBitmap.BlockOffsHi, FileBitmap.BlockOffsLo);
+            if(!pStream.BaseRead(pStream, &ByteOffset, BlockBuffer[0..BytesToRead]))
+                return false;
+
+            // Move the pointers
+            StartOffset += pStream.BlockSize;
+            BlockBuffer = BlockBuffer[pStream.BlockSize .. $];
+            FileBitmap++;
+        }
+    }
+
+    return true;
+}
+
+void PartStream_Close(TBlockStream pStream)
+{
+    PART_FILE_HEADER PartHeader;
+    ulong ByteOffset = 0;
+
+    if(pStream.FileBitmap && pStream.IsModified)
+    {
+        // Prepare the part file header
+        PartHeader.PartialVersion = 2;
+        PartHeader.FileSizeHi     = cast(uint)(pStream.StreamSize >> 0x20);
+        PartHeader.FileSizeLo     = cast(uint)(pStream.StreamSize & 0xFFFFFFFF);
+        PartHeader.BlockSize      = pStream.BlockSize;
+        
+        // Make sure that the header is properly BSWAPed
+        BSWAP_ARRAY32_UNSIGNED((cast(ubyte*)&PartHeader)[0 .. PART_FILE_HEADER.sizeof]);
+        sprintf(PartHeader.GameBuildNumber.ptr, "%u", cast(uint)pStream.BuildNumber);
+
+        // Write the part header
+        pStream.BaseWrite(pStream, &ByteOffset, (cast(ubyte*)&PartHeader)[0 .. PART_FILE_HEADER.sizeof]);
+
+        // Write the block bitmap
+        BSWAP_ARRAY32_UNSIGNED(pStream.FileBitmap);
+        pStream.BaseWrite(pStream, null, pStream.FileBitmap);
+    }
+
+    // Close the base class
+    BlockStream_Close(pStream);
+}
+
+bool PartStream_CreateMirror(TBlockStream pStream)
+{
+    ulong RemainingSize;
+    ulong MasterSize = 0;
+    ulong MirrorSize = 0;
+    ubyte[] FileBitmap;
+    uint dwBitmapSize;
+    uint dwBlockCount;
+    bool bNeedCreateMirrorStream = true;
+    bool bNeedResizeMirrorStream = true;
+
+    // Do we have master function and base creation function?
+    if(pStream.pMaster is null || pStream.BaseCreate is null)
+        return false;
+
+    // Retrieve the master file size, block count and bitmap size
+    FileStream_GetSize(pStream.pMaster, MasterSize);
+    dwBlockCount = cast(uint)((MasterSize + DEFAULT_BLOCK_SIZE - 1) / DEFAULT_BLOCK_SIZE);
+    dwBitmapSize = cast(uint)(dwBlockCount * PART_FILE_MAP_ENTRY.sizeof);
+
+    // Setup stream size and position
+    pStream.BuildNumber = DEFAULT_BUILD_NUMBER;        // BUGBUG: Really???
+    pStream.StreamSize = MasterSize;
+    pStream.StreamPos = 0;
+
+    // Open the base stream for write access
+    if(pStream.BaseOpen(pStream, pStream.szFileName, 0))
+    {
+        // If the file open succeeded, check if the file size matches required size
+        pStream.BaseGetSize(pStream, MirrorSize);
+        if(MirrorSize >= PART_FILE_HEADER.sizeof + dwBitmapSize)
+        {
+            // Check if the remaining size is aligned to block
+            RemainingSize = MirrorSize - PART_FILE_HEADER.sizeof - dwBitmapSize;
+            if((RemainingSize & (DEFAULT_BLOCK_SIZE - 1)) == 0 || RemainingSize == MasterSize)
+            {
+                // Attempt to load an existing file bitmap
+                if(PartStream_LoadBitmap(pStream))
+                    return true;
+            }
+        }
+
+        // We need to create mirror stream
+        bNeedCreateMirrorStream = false;
+    }
+
+    // Create a new stream, if needed
+    if(bNeedCreateMirrorStream)
+    {
+        if(!pStream.BaseCreate(pStream))
+            return false;
+    }
+
+    // If we need to, then resize the mirror stream
+    if(bNeedResizeMirrorStream)
+    {
+        if(!pStream.BaseResize(pStream, PART_FILE_HEADER.sizeof + dwBitmapSize))
+            return false;
+    }
+
+    // Allocate the bitmap array
+    FileBitmap = new ubyte[dwBitmapSize];
+    if(FileBitmap is null)
+        return false;
+
+    // Initialize the bitmap
+    pStream.FileBitmap = FileBitmap;
+    pStream.BitmapSize = dwBitmapSize;
+    pStream.BlockSize  = DEFAULT_BLOCK_SIZE;
+    pStream.BlockCount = dwBlockCount;
+    pStream.IsComplete = 0;
+    pStream.IsModified = 1;
+
+    // Note: Don't write the stream bitmap right away.
+    // Doing so would cause sparse file resize on NTFS,
+    // which would take long time on larger files.
+    return true;
+}
+
+
+TFileStream PartStream_Open(string szFileName, uint dwStreamFlags)
+{
+    TBlockStream pStream;
+
+    // Create new empty stream
+    pStream = AllocateFileStream!TBlockStream(szFileName, dwStreamFlags);
+    if(pStream is null)
+        return null;
+
+    // Do we have a master stream?
+    if(pStream.pMaster !is null)
+    {
+        if(!PartStream_CreateMirror(pStream))
+        {
+            FileStream_Close(pStream);
+            SetLastError(ERROR_FILE_NOT_FOUND);
+            return null;
+        }
+    }
+    else
+    {
+        // Attempt to open the base stream
+        if(!pStream.BaseOpen(pStream, pStream.szFileName, dwStreamFlags))
+        {
+            FileStream_Close(pStream);
+            return null;
+        }
+
+        // Load the part stream block map
+        if(!PartStream_LoadBitmap(pStream))
+        {
+            FileStream_Close(pStream);
+            SetLastError(ERROR_BAD_FORMAT);
+            return null;
+        }
+    }
+
+    // Set the stream position to zero. Stream size is already set
+    assert(pStream.StreamSize != 0);
+    pStream.StreamPos = 0;
+    pStream.dwFlags |= STREAM_FLAG_READ_ONLY;
+
+    // Set new function pointers
+    pStream.StreamRead    = cast(STREAM_READ)&BlockStream_Read;
+    pStream.StreamGetPos  = &BlockStream_GetPos;
+    pStream.StreamGetSize = &BlockStream_GetSize;
+    pStream.StreamClose   = cast(STREAM_CLOSE)&PartStream_Close;
+
+    // Supply the block functions
+    pStream.BlockCheck    = cast(BLOCK_CHECK)&PartStream_BlockCheck;
+    pStream.BlockRead     = cast(BLOCK_READ)&PartStream_BlockRead;
+    return pStream;
+}
+
+//-----------------------------------------------------------------------------
 // File stream allocation function
 
 static STREAM_INIT StreamBaseInit[4] =
@@ -1556,12 +2288,13 @@ static STREAM_INIT StreamBaseInit[4] =
 *   The stream structure is created as flat block, variable length
 *   The file name is placed after the end of the stream structure data
 */
-TFileStream AllocateFileStream(
+T AllocateFileStream(T)(
     string szFileName,
     uint dwStreamFlags)
+    if(is(T : TFileStream))
 {
     TFileStream pMaster = null;
-    TFileStream pStream = null;
+    T pStream = null;
 
     // The caller can specify chain of files in the following form:
     // C:\archive.MPQ*http://www.server.com/MPQs/archive-server.MPQ
@@ -1584,7 +2317,7 @@ TFileStream AllocateFileStream(
     }
     
     // Allocate the stream structure for the given stream type
-    pStream = new TFileStream;
+    pStream = new T();
     if(pStream !is null)
     {
         pStream.pMaster = pMaster;
