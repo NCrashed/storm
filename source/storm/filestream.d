@@ -610,7 +610,6 @@ alias BLOCK_READ = bool function(
     ulong StartOffset,              // Byte offset of start of the block array
     ulong EndOffset,                // End offset (either end of the block or end of the file)
     ubyte[] BlockBuffer,            // Pointer to block-aligned buffer
-    size_t BytesNeeded,             // Number of bytes that are really needed
     bool bAvailable                 // true if the block is available
     );
 
@@ -2272,6 +2271,173 @@ TFileStream PartStream_Open(string szFileName, uint dwStreamFlags)
     pStream.BlockCheck    = cast(BLOCK_CHECK)&PartStream_BlockCheck;
     pStream.BlockRead     = cast(BLOCK_READ)&PartStream_BlockRead;
     return pStream;
+}
+
+//-----------------------------------------------------------------------------
+// Local functions - base block-based support
+
+/**
+*   Generic function that loads blocks from the file
+*   The function groups the block with the same availability,
+*   so the called BlockRead can finish the request in a single system call
+*/
+bool BlockStream_Read(
+    TBlockStream  pStream,                 // Pointer to an open stream
+    ulong * pByteOffset,                   // Pointer to file byte offset. If null, it reads from the current position
+    ubyte[] pbBuffer)                      // Pointer to data to be read               
+{
+    ulong BlockOffset0;
+    ulong BlockOffset;
+    ulong ByteOffset;
+    ulong EndOffset;
+    ubyte[] TransferBuffer;
+    ubyte[] BlockBuffer;
+    uint BlockBufferOffset;                  // Offset of the desired data in the block buffer
+    size_t BytesNeeded;                      // Number of bytes that really need to be read
+    uint BlockSize = pStream.BlockSize;
+    uint BlockCount;
+    bool bPrevBlockAvailable;
+    bool bCallbackCalled = false;
+    bool bBlockAvailable;
+    bool bResult = true;
+
+    // The base block read function must be present
+    assert(pStream.BlockRead !is null);
+
+    // NOP reading of zero bytes
+    if(pbBuffer.length == 0)
+        return true;
+
+    // Get the current position in the stream
+    ByteOffset = (pByteOffset !is null) ? pByteOffset[0] : pStream.StreamPos;
+    EndOffset = ByteOffset + pbBuffer.length;
+    if(EndOffset > pStream.StreamSize)
+    {
+        SetLastError(ERROR_HANDLE_EOF);
+        return false;
+    }
+
+    // Calculate the block parameters
+    BlockOffset0 = BlockOffset = ByteOffset & ~(cast(ulong)BlockSize - 1);
+    BlockCount  = cast(uint)(((EndOffset - BlockOffset) + (BlockSize - 1)) / BlockSize);
+    BytesNeeded = cast(size_t)(EndOffset - BlockOffset);
+
+    // Remember where we have our data
+    assert((BlockSize & (BlockSize - 1)) == 0);
+    BlockBufferOffset = cast(uint)(ByteOffset & (BlockSize - 1));
+
+    // Allocate buffer for reading blocks
+    TransferBuffer = BlockBuffer = new ubyte[cast(size_t)(BlockCount * BlockSize)];
+    if(TransferBuffer is null)
+    {
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return false;
+    }
+
+    // If all blocks are available, just read all blocks at once
+    if(pStream.IsComplete == 0)
+    {
+        // Now parse the blocks and send the block read request
+        // to all blocks with the same availability
+        assert(pStream.BlockCheck !is null);
+        bPrevBlockAvailable = pStream.BlockCheck(pStream, BlockOffset);
+
+        // Loop as long as we have something to read
+        while(BlockOffset < EndOffset)
+        {
+            // Determine availability of the next block
+            bBlockAvailable = pStream.BlockCheck(pStream, BlockOffset);
+
+            // If the availability has changed, read all blocks up to this one
+            if(bBlockAvailable != bPrevBlockAvailable)
+            {
+                // Call the file stream callback, if the block is not available
+                if(pStream.pMaster && pStream.pfnCallback && bPrevBlockAvailable == false)
+                {
+                    pStream.pfnCallback(pStream.UserData, BlockOffset0, cast(uint)(BlockOffset - BlockOffset0));
+                    bCallbackCalled = true;
+                }
+
+                // Load the continuous blocks with the same availability
+                assert(BlockOffset > BlockOffset0);
+                bResult = pStream.BlockRead(pStream, BlockOffset0, BlockOffset, BlockBuffer[0 .. BytesNeeded], bPrevBlockAvailable);
+                if(!bResult)
+                    break;
+
+                // Move the block offset
+                BlockBuffer = BlockBuffer[cast(size_t)(BlockOffset - BlockOffset0) .. $];
+                BytesNeeded -= cast(size_t)(BlockOffset - BlockOffset0);
+                bPrevBlockAvailable = bBlockAvailable;
+                BlockOffset0 = BlockOffset;
+            }
+
+            // Move to the block offset in the stream
+            BlockOffset += BlockSize;
+        }
+
+        // If there is a block(s) remaining to be read, do it
+        if(BlockOffset > BlockOffset0)
+        {
+            // Call the file stream callback, if the block is not available
+            if(pStream.pMaster && pStream.pfnCallback && bPrevBlockAvailable == false)
+            {
+                pStream.pfnCallback(pStream.UserData, BlockOffset0, cast(uint)(BlockOffset - BlockOffset0));
+                bCallbackCalled = true;
+            }
+
+            // Read the complete blocks from the file
+            if(BlockOffset > pStream.StreamSize)
+                BlockOffset = pStream.StreamSize;
+            bResult = pStream.BlockRead(pStream, BlockOffset0, BlockOffset, BlockBuffer[0 .. BytesNeeded], bPrevBlockAvailable);
+        }
+    }
+    else
+    {
+        // Read the complete blocks from the file
+        if(EndOffset > pStream.StreamSize)
+            EndOffset = pStream.StreamSize;
+        bResult = pStream.BlockRead(pStream, BlockOffset, EndOffset, BlockBuffer[0 .. BytesNeeded], true);
+    }
+
+    // Now copy the data to the user buffer
+    if(bResult)
+    {
+        pbBuffer[] = TransferBuffer[cast(size_t)BlockBufferOffset .. $];
+        pStream.StreamPos = ByteOffset + pbBuffer.length;
+    }
+    else
+    {
+        // If the block read failed, set the last error
+        SetLastError(ERROR_FILE_INCOMPLETE);
+    }
+
+    // Call the callback to indicate we are done
+    if(bCallbackCalled)
+        pStream.pfnCallback(pStream.UserData, 0, 0);
+
+    // Free the block buffer and return
+    return bResult;
+}
+
+bool BlockStream_GetSize(TFileStream pStream, out ulong pFileSize)
+{
+    pFileSize = pStream.StreamSize;
+    return true;
+}
+
+bool BlockStream_GetPos(TFileStream pStream, out ulong pByteOffset)
+{
+    pByteOffset = pStream.StreamPos;
+    return true;
+}
+
+void BlockStream_Close(TBlockStream pStream)
+{
+    // Free the data map, if any
+    pStream.FileBitmap = null;
+
+    // Call the base class for closing the stream
+    pStream.BaseClose(pStream);
 }
 
 //-----------------------------------------------------------------------------
