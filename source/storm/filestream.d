@@ -1,7 +1,7 @@
 /**
 *   Copyright: © 1999-2014 Ladislav Zezula
 *   License: Subject to the terms of the MIT license, as written in the included LICENSE file.
-*   Authors: Ladislav Zezula, NCrashed <ncrashed@gmail.com>
+*   Authors: Ladislav Zezula, Sam Wilkins, Ivan Komissarov, NCrashed <ncrashed@gmail.com>
 */
 // Original header
 /*****************************************************************************/

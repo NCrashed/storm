@@ -38,13 +38,6 @@ enum ERROR_FILE_INCOMPLETE          = 10006;
 enum ERROR_UNKNOWN_FILE_NAMES       = 10007;  
 
 // Values for SFileCreateArchive
-/// Verified: If there is 1 file, hash table size is 4
-enum HASH_TABLE_SIZE_MIN       = 0x00000004;  
-/// Default hash table size for empty MPQs
-enum HASH_TABLE_SIZE_DEFAULT   = 0x00001000;  
-/// Maximum acceptable hash table size
-enum HASH_TABLE_SIZE_MAX       = 0x00080000;  
-
 /// Block index for deleted entry in the hash table
 enum HASH_ENTRY_DELETED        = 0xFFFFFFFE;  
 /// Block index for free entry in the hash table
