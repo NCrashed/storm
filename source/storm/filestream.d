@@ -531,6 +531,47 @@ void FileStream_Close(TFileStream pStream)
     }
 }
 
+
+version(unittest)
+{
+    import storm.mpq;
+    
+    int FileStream_Test(string szFileName, uint dwStreamFlags)
+    {
+        TFileStream pStream;
+        TMPQHeader MpqHeader;
+        ulong FilePos;
+    
+        InitializeMpqCryptography();
+    
+        pStream = FileStream_OpenFile(szFileName, dwStreamFlags);
+        if(pStream is null)
+            return GetLastError();
+    
+        // Read the MPQ header
+        FileStream_Read(pStream, null, (cast(ubyte*)&MpqHeader)[0 .. MPQ_HEADER_SIZE_V2]);
+        if(MpqHeader.dwID != ID_MPQ)
+            return ERROR_FILE_CORRUPT;
+    
+        // Read the hash table
+        auto pHash = new TMPQHash[MpqHeader.dwHashTableSize];
+        FilePos = MpqHeader.dwHashTablePos;
+        FileStream_Read(pStream, &FilePos, cast(ubyte[])pHash);
+        DecryptMpqBlock(pHash, MpqHeader.dwHashTableSize * sizeof(TMPQHash), MPQ_KEY_HASH_TABLE);
+        pHash = null;
+    
+        // Read the block table
+        auto pBlock = new TMPQBlock[MpqHeader.dwBlockTableSize];
+        FilePos = MpqHeader.dwBlockTablePos;
+        FileStream_Read(pStream, &FilePos, cast(ubyte[])pBlock);
+        DecryptMpqBlock(pBlock, MpqHeader.dwBlockTableSize * sizeof(TMPQBlock), MPQ_KEY_BLOCK_TABLE);
+        pBlock = null;
+
+        FileStream_Close(pStream);
+        return ERROR_SUCCESS;
+    }
+}
+
 //=============================================================================
 package:
 
