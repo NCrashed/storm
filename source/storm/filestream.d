@@ -2441,6 +2441,303 @@ void BlockStream_Close(TBlockStream pStream)
 }
 
 //-----------------------------------------------------------------------------
+// Local functions - MPQE stream support
+
+enum szKeyTemplate = "expand 32-byte k000000000000000000000000000000000000000000000000";
+
+enum AuthCodeArray =
+[
+    // Starcraft II (Heart of the Swarm)
+    // Authentication code URL: http://dist.blizzard.com/mediakey/hots-authenticationcode-bgdl.txt
+    //                                                                                          -0C-    -1C--08-    -18--04-    -14--00-    -10-
+    "S48B6CDTN5XEQAKQDJNDLJBJ73FDFM3U",         // SC2 Heart of the Swarm-all : "expand 32-byte kQAKQ0000FM3UN5XE000073FD6CDT0000LJBJS48B0000DJND"
+
+    // Diablo III: Agent.exe (1.0.0.954)
+    // Address of decryption routine: 00502b00                             
+    // Pointer to decryptor object: ECX
+    // Pointer to key: ECX+0x5C
+    // Authentication code URL: http://dist.blizzard.com/mediakey/d3-authenticationcode-enGB.txt
+    //                                                                                           -0C-    -1C--08-    -18--04-    -14--00-    -10-
+    "UCMXF6EJY352EFH4XFRXCFH2XC9MQRZK",         // Diablo III Installer (deDE): "expand 32-byte kEFH40000QRZKY3520000XC9MF6EJ0000CFH2UCMX0000XFRX"
+    "MMKVHY48RP7WXP4GHYBQ7SL9J9UNPHBP",         // Diablo III Installer (enGB): "expand 32-byte kXP4G0000PHBPRP7W0000J9UNHY4800007SL9MMKV0000HYBQ"
+    "8MXLWHQ7VGGLTZ9MQZQSFDCLJYET3CPP",         // Diablo III Installer (enSG): "expand 32-byte kTZ9M00003CPPVGGL0000JYETWHQ70000FDCL8MXL0000QZQS"
+    "EJ2R5TM6XFE2GUNG5QDGHKQ9UAKPWZSZ",         // Diablo III Installer (enUS): "expand 32-byte kGUNG0000WZSZXFE20000UAKP5TM60000HKQ9EJ2R00005QDG"
+    "PBGFBE42Z6LNK65UGJQ3WZVMCLP4HQQT",         // Diablo III Installer (esES): "expand 32-byte kK65U0000HQQTZ6LN0000CLP4BE420000WZVMPBGF0000GJQ3"
+    "X7SEJJS9TSGCW5P28EBSC47AJPEY8VU2",         // Diablo III Installer (esMX): "expand 32-byte kW5P200008VU2TSGC0000JPEYJJS90000C47AX7SE00008EBS"
+    "5KVBQA8VYE6XRY3DLGC5ZDE4XS4P7YA2",         // Diablo III Installer (frFR): "expand 32-byte kRY3D00007YA2YE6X0000XS4PQA8V0000ZDE45KVB0000LGC5"
+    "478JD2K56EVNVVY4XX8TDWYT5B8KB254",         // Diablo III Installer (itIT): "expand 32-byte kVVY40000B2546EVN00005B8KD2K50000DWYT478J0000XX8T"
+    "8TS4VNFQRZTN6YWHE9CHVDH9NVWD474A",         // Diablo III Installer (koKR): "expand 32-byte k6YWH0000474ARZTN0000NVWDVNFQ0000VDH98TS40000E9CH"
+    "LJ52Z32DF4LZ4ZJJXVKK3AZQA6GABLJB",         // Diablo III Installer (plPL): "expand 32-byte k4ZJJ0000BLJBF4LZ0000A6GAZ32D00003AZQLJ520000XVKK"
+    "K6BDHY2ECUE2545YKNLBJPVYWHE7XYAG",         // Diablo III Installer (ptBR): "expand 32-byte k545Y0000XYAGCUE20000WHE7HY2E0000JPVYK6BD0000KNLB"
+    "NDVW8GWLAYCRPGRNY8RT7ZZUQU63VLPR",         // Diablo III Installer (ruRU): "expand 32-byte kXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+    "6VWCQTN8V3ZZMRUCZXV8A8CGUX2TAA8H",         // Diablo III Installer (zhTW): "expand 32-byte kMRUC0000AA8HV3ZZ0000UX2TQTN80000A8CG6VWC0000ZXV8"
+//  "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",         // Diablo III Installer (zhCN): "expand 32-byte kXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+
+    // Starcraft II (Wings of Liberty): Installer.exe (4.1.1.4219)
+    // Address of decryption routine: 0053A3D0
+    // Pointer to decryptor object: ECX
+    // Pointer to key: ECX+0x5C
+    // Authentication code URL: http://dist.blizzard.com/mediakey/sc2-authenticationcode-enUS.txt
+    //                                                                                          -0C-    -1C--08-    -18--04-    -14--00-    -10-
+    "Y45MD3CAK4KXSSXHYD9VY64Z8EKJ4XFX",         // SC2 Wings of Liberty (deDE): "expand 32-byte kSSXH00004XFXK4KX00008EKJD3CA0000Y64ZY45M0000YD9V"
+    "G8MN8UDG6NA2ANGY6A3DNY82HRGF29ZH",         // SC2 Wings of Liberty (enGB): "expand 32-byte kANGY000029ZH6NA20000HRGF8UDG0000NY82G8MN00006A3D"
+    "W9RRHLB2FDU9WW5B3ECEBLRSFWZSF7HW",         // SC2 Wings of Liberty (enSG): "expand 32-byte kWW5B0000F7HWFDU90000FWZSHLB20000BLRSW9RR00003ECE"
+    "3DH5RE5NVM5GTFD85LXGWT6FK859ETR5",         // SC2 Wings of Liberty (enUS): "expand 32-byte kTFD80000ETR5VM5G0000K859RE5N0000WT6F3DH500005LXG"
+    "8WLKUAXE94PFQU4Y249PAZ24N4R4XKTQ",         // SC2 Wings of Liberty (esES): "expand 32-byte kQU4Y0000XKTQ94PF0000N4R4UAXE0000AZ248WLK0000249P"
+    "A34DXX3VHGGXSQBRFE5UFFDXMF9G4G54",         // SC2 Wings of Liberty (esMX): "expand 32-byte kSQBR00004G54HGGX0000MF9GXX3V0000FFDXA34D0000FE5U"
+    "ZG7J9K938HJEFWPQUA768MA2PFER6EAJ",         // SC2 Wings of Liberty (frFR): "expand 32-byte kFWPQ00006EAJ8HJE0000PFER9K9300008MA2ZG7J0000UA76"
+    "NE7CUNNNTVAPXV7E3G2BSVBWGVMW8BL2",         // SC2 Wings of Liberty (itIT): "expand 32-byte kXV7E00008BL2TVAP0000GVMWUNNN0000SVBWNE7C00003G2B"
+    "3V9E2FTMBM9QQWK7U6MAMWAZWQDB838F",         // SC2 Wings of Liberty (koKR): "expand 32-byte kQWK70000838FBM9Q0000WQDB2FTM0000MWAZ3V9E0000U6MA"
+    "2NSFB8MELULJ83U6YHA3UP6K4MQD48L6",         // SC2 Wings of Liberty (plPL): "expand 32-byte k83U6000048L6LULJ00004MQDB8ME0000UP6K2NSF0000YHA3"
+    "QA2TZ9EWZ4CUU8BMB5WXCTY65F9CSW4E",         // SC2 Wings of Liberty (ptBR): "expand 32-byte kU8BM0000SW4EZ4CU00005F9CZ9EW0000CTY6QA2T0000B5WX"
+    "VHB378W64BAT9SH7D68VV9NLQDK9YEGT",         // SC2 Wings of Liberty (ruRU): "expand 32-byte k9SH70000YEGT4BAT0000QDK978W60000V9NLVHB30000D68V"
+    "U3NFQJV4M6GC7KBN9XQJ3BRDN3PLD9NE",         // SC2 Wings of Liberty (zhTW): "expand 32-byte k7KBN0000D9NEM6GC0000N3PLQJV400003BRDU3NF00009XQJ"
+];
+
+uint Rol32(uint dwValue, uint dwRolCount)
+{
+    uint dwShiftRight = 32 - dwRolCount;
+
+    return (dwValue << dwRolCount) | (dwValue >> dwShiftRight);
+}
+
+void CreateKeyFromAuthCode(
+    ubyte[] pbKeyBuffer,
+    string szAuthCode)
+{
+    uint[] KeyPosition = cast(uint[])(pbKeyBuffer[0x10 .. $]);
+    uint[] AuthCode32 = cast(uint[])szAuthCode;
+
+    pbKeyBuffer[] = (cast(ubyte[])szKeyTemplate)[0 .. MPQE_CHUNK_SIZE];
+    KeyPosition[0x00] = AuthCode32[0x03];
+    KeyPosition[0x02] = AuthCode32[0x07];
+    KeyPosition[0x03] = AuthCode32[0x02];
+    KeyPosition[0x05] = AuthCode32[0x06];
+    KeyPosition[0x06] = AuthCode32[0x01];
+    KeyPosition[0x08] = AuthCode32[0x05];
+    KeyPosition[0x09] = AuthCode32[0x00];
+    KeyPosition[0x0B] = AuthCode32[0x04];
+    BSWAP_ARRAY32_UNSIGNED(pbKeyBuffer[0 .. MPQE_CHUNK_SIZE]);
+}
+
+void DecryptFileChunk(
+    uint[] MpqData,
+    ubyte[] pbKey,
+    ulong ByteOffset)
+{
+    ulong ChunkOffset;
+    uint[MPQE_CHUNK_SIZE / uint.sizeof] KeyShuffled;
+    uint[MPQE_CHUNK_SIZE / uint.sizeof] KeyMirror;
+    uint RoundCount = 0x14;
+
+    // Prepare the key
+    ChunkOffset = ByteOffset / MPQE_CHUNK_SIZE;
+    KeyMirror[] = cast(uint[])(pbKey[0 .. MPQE_CHUNK_SIZE]);
+    BSWAP_ARRAY32_UNSIGNED(KeyMirror);
+    KeyMirror[0x05] = cast(uint)(ChunkOffset >> 32);
+    KeyMirror[0x08] = cast(uint)(ChunkOffset);
+
+    size_t dwLength = (cast(ubyte[])MpqData).length;
+    while(dwLength >= MPQE_CHUNK_SIZE)
+    {
+        // Shuffle the key - part 1
+        KeyShuffled[0x0E] = KeyMirror[0x00];
+        KeyShuffled[0x0C] = KeyMirror[0x01];
+        KeyShuffled[0x05] = KeyMirror[0x02];
+        KeyShuffled[0x0F] = KeyMirror[0x03];
+        KeyShuffled[0x0A] = KeyMirror[0x04];
+        KeyShuffled[0x07] = KeyMirror[0x05];
+        KeyShuffled[0x0B] = KeyMirror[0x06];
+        KeyShuffled[0x09] = KeyMirror[0x07];
+        KeyShuffled[0x03] = KeyMirror[0x08];
+        KeyShuffled[0x06] = KeyMirror[0x09];
+        KeyShuffled[0x08] = KeyMirror[0x0A];
+        KeyShuffled[0x0D] = KeyMirror[0x0B];
+        KeyShuffled[0x02] = KeyMirror[0x0C];
+        KeyShuffled[0x04] = KeyMirror[0x0D];
+        KeyShuffled[0x01] = KeyMirror[0x0E];
+        KeyShuffled[0x00] = KeyMirror[0x0F];
+        
+        // Shuffle the key - part 2
+        for(uint i = 0; i < RoundCount; i += 2)
+        {
+            KeyShuffled[0x0A] = KeyShuffled[0x0A] ^ Rol32((KeyShuffled[0x0E] + KeyShuffled[0x02]), 0x07);
+            KeyShuffled[0x03] = KeyShuffled[0x03] ^ Rol32((KeyShuffled[0x0A] + KeyShuffled[0x0E]), 0x09);
+            KeyShuffled[0x02] = KeyShuffled[0x02] ^ Rol32((KeyShuffled[0x03] + KeyShuffled[0x0A]), 0x0D);
+            KeyShuffled[0x0E] = KeyShuffled[0x0E] ^ Rol32((KeyShuffled[0x02] + KeyShuffled[0x03]), 0x12);
+
+            KeyShuffled[0x07] = KeyShuffled[0x07] ^ Rol32((KeyShuffled[0x0C] + KeyShuffled[0x04]), 0x07);
+            KeyShuffled[0x06] = KeyShuffled[0x06] ^ Rol32((KeyShuffled[0x07] + KeyShuffled[0x0C]), 0x09);
+            KeyShuffled[0x04] = KeyShuffled[0x04] ^ Rol32((KeyShuffled[0x06] + KeyShuffled[0x07]), 0x0D);
+            KeyShuffled[0x0C] = KeyShuffled[0x0C] ^ Rol32((KeyShuffled[0x04] + KeyShuffled[0x06]), 0x12);
+
+            KeyShuffled[0x0B] = KeyShuffled[0x0B] ^ Rol32((KeyShuffled[0x05] + KeyShuffled[0x01]), 0x07);
+            KeyShuffled[0x08] = KeyShuffled[0x08] ^ Rol32((KeyShuffled[0x0B] + KeyShuffled[0x05]), 0x09);
+            KeyShuffled[0x01] = KeyShuffled[0x01] ^ Rol32((KeyShuffled[0x08] + KeyShuffled[0x0B]), 0x0D);
+            KeyShuffled[0x05] = KeyShuffled[0x05] ^ Rol32((KeyShuffled[0x01] + KeyShuffled[0x08]), 0x12);
+
+            KeyShuffled[0x09] = KeyShuffled[0x09] ^ Rol32((KeyShuffled[0x0F] + KeyShuffled[0x00]), 0x07);
+            KeyShuffled[0x0D] = KeyShuffled[0x0D] ^ Rol32((KeyShuffled[0x09] + KeyShuffled[0x0F]), 0x09);
+            KeyShuffled[0x00] = KeyShuffled[0x00] ^ Rol32((KeyShuffled[0x0D] + KeyShuffled[0x09]), 0x0D);
+            KeyShuffled[0x0F] = KeyShuffled[0x0F] ^ Rol32((KeyShuffled[0x00] + KeyShuffled[0x0D]), 0x12);
+
+            KeyShuffled[0x04] = KeyShuffled[0x04] ^ Rol32((KeyShuffled[0x0E] + KeyShuffled[0x09]), 0x07);
+            KeyShuffled[0x08] = KeyShuffled[0x08] ^ Rol32((KeyShuffled[0x04] + KeyShuffled[0x0E]), 0x09);
+            KeyShuffled[0x09] = KeyShuffled[0x09] ^ Rol32((KeyShuffled[0x08] + KeyShuffled[0x04]), 0x0D);
+            KeyShuffled[0x0E] = KeyShuffled[0x0E] ^ Rol32((KeyShuffled[0x09] + KeyShuffled[0x08]), 0x12);
+
+            KeyShuffled[0x01] = KeyShuffled[0x01] ^ Rol32((KeyShuffled[0x0C] + KeyShuffled[0x0A]), 0x07);
+            KeyShuffled[0x0D] = KeyShuffled[0x0D] ^ Rol32((KeyShuffled[0x01] + KeyShuffled[0x0C]), 0x09);
+            KeyShuffled[0x0A] = KeyShuffled[0x0A] ^ Rol32((KeyShuffled[0x0D] + KeyShuffled[0x01]), 0x0D);
+            KeyShuffled[0x0C] = KeyShuffled[0x0C] ^ Rol32((KeyShuffled[0x0A] + KeyShuffled[0x0D]), 0x12);
+
+            KeyShuffled[0x00] = KeyShuffled[0x00] ^ Rol32((KeyShuffled[0x05] + KeyShuffled[0x07]), 0x07);
+            KeyShuffled[0x03] = KeyShuffled[0x03] ^ Rol32((KeyShuffled[0x00] + KeyShuffled[0x05]), 0x09);
+            KeyShuffled[0x07] = KeyShuffled[0x07] ^ Rol32((KeyShuffled[0x03] + KeyShuffled[0x00]), 0x0D);
+            KeyShuffled[0x05] = KeyShuffled[0x05] ^ Rol32((KeyShuffled[0x07] + KeyShuffled[0x03]), 0x12);
+
+            KeyShuffled[0x02] = KeyShuffled[0x02] ^ Rol32((KeyShuffled[0x0F] + KeyShuffled[0x0B]), 0x07);
+            KeyShuffled[0x06] = KeyShuffled[0x06] ^ Rol32((KeyShuffled[0x02] + KeyShuffled[0x0F]), 0x09);
+            KeyShuffled[0x0B] = KeyShuffled[0x0B] ^ Rol32((KeyShuffled[0x06] + KeyShuffled[0x02]), 0x0D);
+            KeyShuffled[0x0F] = KeyShuffled[0x0F] ^ Rol32((KeyShuffled[0x0B] + KeyShuffled[0x06]), 0x12);
+        }
+
+        // Decrypt one data chunk
+        BSWAP_ARRAY32_UNSIGNED(MpqData);
+        MpqData[0x00] = MpqData[0x00] ^ (KeyShuffled[0x0E] + KeyMirror[0x00]);
+        MpqData[0x01] = MpqData[0x01] ^ (KeyShuffled[0x04] + KeyMirror[0x0D]);
+        MpqData[0x02] = MpqData[0x02] ^ (KeyShuffled[0x08] + KeyMirror[0x0A]);
+        MpqData[0x03] = MpqData[0x03] ^ (KeyShuffled[0x09] + KeyMirror[0x07]);
+        MpqData[0x04] = MpqData[0x04] ^ (KeyShuffled[0x0A] + KeyMirror[0x04]);
+        MpqData[0x05] = MpqData[0x05] ^ (KeyShuffled[0x0C] + KeyMirror[0x01]);
+        MpqData[0x06] = MpqData[0x06] ^ (KeyShuffled[0x01] + KeyMirror[0x0E]);
+        MpqData[0x07] = MpqData[0x07] ^ (KeyShuffled[0x0D] + KeyMirror[0x0B]);
+        MpqData[0x08] = MpqData[0x08] ^ (KeyShuffled[0x03] + KeyMirror[0x08]);
+        MpqData[0x09] = MpqData[0x09] ^ (KeyShuffled[0x07] + KeyMirror[0x05]);
+        MpqData[0x0A] = MpqData[0x0A] ^ (KeyShuffled[0x05] + KeyMirror[0x02]);
+        MpqData[0x0B] = MpqData[0x0B] ^ (KeyShuffled[0x00] + KeyMirror[0x0F]);
+        MpqData[0x0C] = MpqData[0x0C] ^ (KeyShuffled[0x02] + KeyMirror[0x0C]);
+        MpqData[0x0D] = MpqData[0x0D] ^ (KeyShuffled[0x06] + KeyMirror[0x09]);
+        MpqData[0x0E] = MpqData[0x0E] ^ (KeyShuffled[0x0B] + KeyMirror[0x06]);
+        MpqData[0x0F] = MpqData[0x0F] ^ (KeyShuffled[0x0F] + KeyMirror[0x03]);
+        BSWAP_ARRAY32_UNSIGNED(MpqData, MPQE_CHUNK_SIZE);
+
+        // Update byte offset in the key
+        KeyMirror[0x08]++;
+        if(KeyMirror[0x08] == 0)
+            KeyMirror[0x05]++;
+
+        // Move pointers and decrease number of bytes to decrypt
+        MpqData  = MpqData[cast(size_t)(MPQE_CHUNK_SIZE / uint.sizeof) .. $];
+        dwLength -= MPQE_CHUNK_SIZE;
+    }
+}
+
+bool MpqeStream_DetectFileKey(TEncryptedStream pStream)
+{
+    ulong ByteOffset = 0;
+    ubyte[MPQE_CHUNK_SIZE] EncryptedHeader;
+    ubyte[MPQE_CHUNK_SIZE] FileHeader;
+
+    // Read the first file chunk
+    if(pStream.BaseRead(pStream, &ByteOffset, EncryptedHeader))
+    {
+        // We just try all known keys one by one
+        foreach(key; AuthCodeArray)
+        {
+            // Prepare they decryption key from game serial number
+            CreateKeyFromAuthCode(pStream.Key, key);
+
+            // Try to decrypt with the given key 
+            FileHeader[] = EncryptedHeader[];
+            DecryptFileChunk(cast(uint[])FileHeader, pStream.Key, ByteOffset);
+
+            // We check the decrypted data
+            // All known encrypted MPQs have header at the begin of the file,
+            // so we check for MPQ signature there.
+            if(cast(char)FileHeader[0] == 'M' && cast(char)FileHeader[1] == 'P' && cast(char)FileHeader[2] == 'Q')
+            {
+                // Update the stream size
+                pStream.StreamSize = pStream.Base.File.FileSize;
+
+                // Fill the block information
+                pStream.BlockSize  = MPQE_CHUNK_SIZE;
+                pStream.BlockCount = cast(uint)(pStream.Base.File.FileSize + MPQE_CHUNK_SIZE - 1) / MPQE_CHUNK_SIZE;
+                pStream.IsComplete = 1;
+                return true;
+            }
+        }
+    }
+
+    // Key not found, sorry
+    return false;
+}
+
+bool MpqeStream_BlockRead(
+    TEncryptedStream pStream,
+    ulong StartOffset,
+    ulong EndOffset,
+    ubyte[] BlockBuffer,
+    bool bAvailable)
+{
+    size_t dwBytesToRead;
+
+    assert((StartOffset & (pStream.BlockSize - 1)) == 0);
+    assert(StartOffset < EndOffset);
+    assert(bAvailable != false);
+
+    // Read the file from the stream as-is
+    // Limit the reading to number of blocks really needed
+    dwBytesToRead = cast(size_t)(EndOffset - StartOffset);
+    if(!pStream.BaseRead(pStream, &StartOffset, BlockBuffer[0 .. dwBytesToRead]))
+        return false;
+
+    // Decrypt the data
+    dwBytesToRead = (dwBytesToRead + MPQE_CHUNK_SIZE - 1) & ~(MPQE_CHUNK_SIZE - 1);
+    DecryptFileChunk(cast(uint[])BlockBuffer, pStream.Key, StartOffset);
+    return true;
+}
+
+TFileStream MpqeStream_Open(string szFileName, uint dwStreamFlags)
+{
+    TEncryptedStream pStream;
+
+    // Create new empty stream
+    pStream = AllocateFileStream!TEncryptedStream(szFileName, dwStreamFlags);
+    if(pStream is null)
+        return null;
+
+    // Attempt to open the base stream
+    assert(pStream.BaseOpen !is null);
+    if(!pStream.BaseOpen(pStream, pStream.szFileName, dwStreamFlags))
+        return null;
+
+    // Determine the encryption key for the MPQ
+    if(MpqeStream_DetectFileKey(pStream))
+    {
+        // Set the stream position and size
+        assert(pStream.StreamSize != 0);
+        pStream.StreamPos = 0;
+        pStream.dwFlags |= STREAM_FLAG_READ_ONLY;
+
+        // Set new function pointers
+        pStream.StreamRead    = cast(STREAM_READ)&BlockStream_Read;
+        pStream.StreamGetPos  = &BlockStream_GetPos;
+        pStream.StreamGetSize = &BlockStream_GetSize;
+        pStream.StreamClose   = pStream.BaseClose;
+
+        // Supply the block functions
+        pStream.BlockRead     = cast(BLOCK_READ)&MpqeStream_BlockRead;
+        return pStream;
+    }
+
+    // Cleanup the stream and return
+    FileStream_Close(pStream);
+    SetLastError(ERROR_UNKNOWN_FILE_KEY);
+    return null;
+}
+
+//-----------------------------------------------------------------------------
 // File stream allocation function
 
 static STREAM_INIT StreamBaseInit[4] =
