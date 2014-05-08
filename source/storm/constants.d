@@ -5,6 +5,8 @@
 */
 module storm.constants;
 
+enum StormLibCopyright = "StormLib v " ~ STORMLIB_VERSION_STRING ~ " Copyright Ladislav Zezula 1998-2014";
+
 /// Current version of StormLib (9.0)
 enum STORMLIB_VERSION = 0x0900;
 /// String version of StormLib version
