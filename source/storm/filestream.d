@@ -3,6 +3,21 @@
 *   License: Subject to the terms of the MIT license, as written in the included LICENSE file.
 *   Authors: Ladislav Zezula, NCrashed <ncrashed@gmail.com>
 */
+// Original header
+/*****************************************************************************/
+/* FileStream.cpp                         Copyright (c) Ladislav Zezula 2010 */
+/*---------------------------------------------------------------------------*/
+/* File stream support for StormLib                                          */
+/*                                                                           */
+/* Windows support: Written by Ladislav Zezula                               */
+/* Mac support:     Written by Sam Wilkins                                   */
+/* Linux support:   Written by Sam Wilkins and Ivan Komissarov               */
+/* Big-endian:      Written & debugged by Sam Wilkins                        */
+/*---------------------------------------------------------------------------*/
+/*   Date    Ver   Who  Comment                                              */
+/* --------  ----  ---  -------                                              */
+/* 11.06.10  1.00  Lad  Derived from StormPortMac.cpp and StormPortLinux.cpp */
+/*****************************************************************************/
 module storm.filestream;
 
 import storm.callback;
