@@ -548,6 +548,8 @@ version(Posix)
 
 import std.string;
 import std.algorithm;
+import std.array;
+import std.format;
 import std.range;
 import std.conv;
 
@@ -2337,4 +2339,187 @@ unittest
 {
     assert(splitter("C:\archive.MPQ*http://www.server.com/MPQs/archive-server.MPQ", '*').equal(["C:\archive.MPQ", "", "http://www.server.com/MPQs/archive-server.MPQ"]));
     assert(splitter("C:\archive.MPQ", '*').equal(["C:\archive.MPQ"]));
+}
+
+//-----------------------------------------------------------------------------
+// Local functions - Block4 stream support
+
+/// Size of one block
+enum BLOCK4_BLOCK_SIZE   = 0x4000;          
+/// Size of MD5 hash that is after each block
+enum BLOCK4_HASH_SIZE    = 0x20;            
+/// Maximum amount of blocks per file
+enum BLOCK4_MAX_BLOCKS   = 0x00002000;      
+/// Max size of one file
+enum BLOCK4_MAX_FSIZE    = 0x08040000;      
+
+bool Block4Stream_BlockRead(
+    TBlockStream pStream,                // Pointer to an open stream
+    ulong StartOffset,
+    ulong EndOffset,
+    ubyte[] BlockBuffer,
+    bool bAvailable)
+{
+    TBaseProviderData* BaseArray = cast(TBaseProviderData*)pStream.FileBitmap.ptr;
+    ulong ByteOffset;
+    size_t BytesToRead;
+    uint StreamIndex;
+    uint BlockIndex;
+    bool bResult;
+
+    // The starting offset must be aligned to size of the block
+    assert(pStream.FileBitmap !is null);
+    assert((StartOffset & (pStream.BlockSize - 1)) == 0);
+    assert(StartOffset < EndOffset);
+    assert(bAvailable == true);
+
+    // Keep compiler happy
+    bAvailable = bAvailable;
+    EndOffset = EndOffset;
+
+    while(BlockBuffer.length != 0)
+    {
+        // Calculate the block index and the file index
+        StreamIndex = cast(uint)((StartOffset / pStream.BlockSize) / BLOCK4_MAX_BLOCKS);
+        BlockIndex  = cast(uint)((StartOffset / pStream.BlockSize) % BLOCK4_MAX_BLOCKS);
+        if(StreamIndex > pStream.BitmapSize)
+            return false;
+
+        // Calculate the block offset
+        ByteOffset = (cast(ulong)BlockIndex * (BLOCK4_BLOCK_SIZE + BLOCK4_HASH_SIZE));
+        BytesToRead = STORMLIB_MIN(BlockBuffer.length, cast(size_t)BLOCK4_BLOCK_SIZE);
+
+        // Read from the base stream
+        pStream.Base = BaseArray[StreamIndex];
+        bResult = pStream.BaseRead(pStream, &ByteOffset, BlockBuffer[0 .. BytesToRead]);
+        BaseArray[StreamIndex] = pStream.Base;
+
+        // Did the result succeed?
+        if(bResult == false)
+            return false;
+
+        // Move pointers
+        StartOffset += BytesToRead;
+        BlockBuffer = BlockBuffer[BytesToRead .. $];
+    }
+
+    return true;
+}
+
+
+void Block4Stream_Close(TBlockStream pStream)
+{
+    TBaseProviderData* BaseArray = cast(TBaseProviderData*)pStream.FileBitmap;
+
+    // If we have a non-zero count of base streams,
+    // we have to close them all
+    if(BaseArray !is null)
+    {
+        // Close all base streams
+        for(uint i = 0; i < pStream.BitmapSize; i++)
+        {
+            pStream.Base = BaseArray[i];
+            pStream.BaseClose(pStream);
+        }
+    }
+
+    // Free the data map, if any
+    pStream.FileBitmap = null;
+
+    // Do not call the BaseClose function,
+    // we closed all handles already
+    return;
+}
+
+TFileStream Block4Stream_Open(string szFileName, uint dwStreamFlags)
+{
+    ulong RemainderBlock;
+    ulong BlockCount;
+    ulong FileSize;
+    TBlockStream pStream;
+    uint dwBaseFiles = 0;
+    uint dwBaseFlags;
+
+    // Create new empty stream
+    pStream = AllocateFileStream!TBlockStream(szFileName, dwStreamFlags);
+    if(pStream is null)
+        return null;
+
+    // Sanity check
+    assert(pStream.BaseOpen !is null);
+
+    // Get the length of the file name without numeric suffix
+    if(pStream.szFileName.endsWith(".0"))
+        pStream.szFileName = pStream.szFileName[0 .. $-2];
+
+    // Supply the stream functions
+    pStream.StreamRead    = cast(STREAM_READ)&BlockStream_Read;
+    pStream.StreamGetSize = &BlockStream_GetSize;
+    pStream.StreamGetPos  = &BlockStream_GetPos;
+    pStream.StreamClose   = cast(STREAM_CLOSE)&Block4Stream_Close;
+    pStream.BlockRead     = cast(BLOCK_READ)&Block4Stream_BlockRead;
+
+    // Set the base flags
+    dwBaseFlags = (dwStreamFlags & STREAM_PROVIDERS_MASK) | STREAM_FLAG_READ_ONLY;
+
+    // Init builder for base providers
+    auto builder = appender!(TBaseProviderData[]);
+    
+    // Go all suffixes from 0 to 30
+    for(int nSuffix = 0; nSuffix < 30; nSuffix++)
+    {
+        // Open the n-th file
+        auto szNameBuff = appender!string;
+        szNameBuff.formattedWrite("%s.%s", pStream.szFileName, nSuffix);
+        if(!pStream.BaseOpen(pStream, szNameBuff.data, dwBaseFlags))
+            break;
+
+        // Also copy the opened base array
+        builder.put(pStream.Base);
+        dwBaseFiles++;
+
+        // Get the size of the base stream
+        pStream.BaseGetSize(pStream, FileSize);
+        assert(FileSize <= BLOCK4_MAX_FSIZE);
+        RemainderBlock = FileSize % (BLOCK4_BLOCK_SIZE + BLOCK4_HASH_SIZE);
+        BlockCount = FileSize / (BLOCK4_BLOCK_SIZE + BLOCK4_HASH_SIZE);
+        
+        // Increment the stream size and number of blocks            
+        pStream.StreamSize += (BlockCount * BLOCK4_BLOCK_SIZE);
+        pStream.BlockCount += cast(uint)BlockCount;
+
+        // Is this the last file?
+        if(FileSize < BLOCK4_MAX_FSIZE)
+        {
+            if(RemainderBlock)
+            {
+                pStream.StreamSize += (RemainderBlock - BLOCK4_HASH_SIZE);
+                pStream.BlockCount++;
+            }
+            break;
+        }
+    }
+    // Save builded base array
+    pStream.FileBitmap = cast(ubyte[])builder.data;
+    
+    // Fill the remainining block stream variables
+    pStream.BitmapSize = dwBaseFiles;
+    pStream.BlockSize  = BLOCK4_BLOCK_SIZE;
+    pStream.IsComplete = 1;
+    pStream.IsModified = 0;
+
+    // Fill the remaining stream variables
+    pStream.StreamPos = 0;
+    pStream.dwFlags |= STREAM_FLAG_READ_ONLY;
+
+
+    // If we opened something, return success
+    if(dwBaseFiles == 0)
+    {
+        FileStream_Close(pStream);
+        SetLastError(ERROR_FILE_NOT_FOUND);
+        pStream = null;
+    }
+
+    return pStream;
 }

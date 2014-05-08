@@ -353,6 +353,18 @@ enum MD5_DIGEST_SIZE                   = 0x10;
 enum SHA1_DIGEST_SIZE                  = 0x14;  // 160 bits
 enum LANG_NEUTRAL                      = 0x00;  // Neutral locale
 
+// Prevent problems with CRT "min" and "max" functions,
+// as they are not defined on all platforms
+T STORMLIB_MIN(T)(T a, T b)
+{
+    return (a < b) ? a : b;
+}
+
+T STORMLIB_MAX(T)(T a, T b) 
+{
+    return (a > b) ? a : b;
+}
+
 /// Macro for building 64-bit file offset from two 32-bit
 ulong MAKE_OFFSET64(uint hi, uint lo)
 {
