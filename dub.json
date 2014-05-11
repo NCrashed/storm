@@ -7,5 +7,6 @@
 		"ladislav-zezula",
 		"NCrashed <ncrashed@gmail.com>"],
 	"dependencies": {
+	   "libtomcrypt": "~master"
 	}
 }

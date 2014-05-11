@@ -6,6 +6,7 @@
 module storm.hashing;
 
 import storm.common;
+import tomcrypt.tomcrypt;
 
 /// Verified: If there is 1 file, hash table size is 4
 enum HASH_TABLE_SIZE_MIN       = 0x00000004;  
@@ -57,7 +58,7 @@ void InitializeMpqCryptography()
         register_hash(&sha1_desc);
 
         // Use LibTomMath as support math library for LibTomCrypt
-        ltc_mp = ltm_desc;    
+        ltc_mp = cast()ltm_desc;
 
         // Don't do that again
         bMpqCryptographyInitialized = true;
