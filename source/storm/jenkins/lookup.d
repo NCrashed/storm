@@ -1047,42 +1047,43 @@ version(unittest)
         ubyte* p;
         
         writeln("Endianness.  These lines should all be the same (for values filled in):");
+        size_t nl = q.length/4;
         writefln("%.8x                            %.8x                            %.8x",
-             hashword(cast(uint[])q[0 .. ($-1)/4*4], 13),
-             hashword(cast(uint[])q[0 .. ($-5)/4*4], 13),
-             hashword(cast(uint[])q[0 .. ($-9)/4*4], 13));
-        p = q.ptr;
+             hashword((cast(uint[])q)[0 .. nl], 13),
+             hashword((cast(uint[])q)[0 .. nl-1], 13),
+             hashword((cast(uint[])q)[0 .. nl-2], 13));
+        p = q.ptr; nl = q.length;
         writefln("%.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x",
-             hashlittle(p[0 .. q.length-1], 13),  hashlittle(p[0 .. q.length-2], 13),
-             hashlittle(p[0 .. q.length-3], 13),  hashlittle(p[0 .. q.length-4], 13),
-             hashlittle(p[0 .. q.length-5], 13),  hashlittle(p[0 .. q.length-6], 13),
-             hashlittle(p[0 .. q.length-7], 13),  hashlittle(p[0 .. q.length-8], 13),
-             hashlittle(p[0 .. q.length-9], 13),  hashlittle(p[0 .. q.length-10], 13),
-             hashlittle(p[0 .. q.length-11], 13), hashlittle(p[0 .. q.length-12], 13));
+             hashlittle(p[0 .. nl  ], 13),  hashlittle(p[0 .. nl-1], 13),
+             hashlittle(p[0 .. nl-2], 13),  hashlittle(p[0 .. nl-3], 13),
+             hashlittle(p[0 .. nl-4], 13),  hashlittle(p[0 .. nl-5], 13),
+             hashlittle(p[0 .. nl-6], 13),  hashlittle(p[0 .. nl-6], 13),
+             hashlittle(p[0 .. nl-8], 13),  hashlittle(p[0 .. nl-9], 13),
+             hashlittle(p[0 .. nl-10], 13), hashlittle(p[0 .. nl-11], 13));
         p = &qq[1];
         writefln("%.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x",
-             hashlittle(p[0 .. q.length-1], 13), hashlittle(p[0 .. q.length-2], 13),
-             hashlittle(p[0 .. q.length-3], 13), hashlittle(p[0 .. q.length-4], 13),
-             hashlittle(p[0 .. q.length-5], 13), hashlittle(p[0 .. q.length-6], 13),
-             hashlittle(p[0 .. q.length-7], 13), hashlittle(p[0 .. q.length-8], 13),
-             hashlittle(p[0 .. q.length-9], 13), hashlittle(p[0 .. q.length-10], 13),
-             hashlittle(p[0 .. q.length-11], 13), hashlittle(p[0 .. q.length-12], 13));
+             hashlittle(p[0 .. nl  ], 13),  hashlittle(p[0 .. nl-1], 13),
+             hashlittle(p[0 .. nl-2], 13),  hashlittle(p[0 .. nl-3], 13),
+             hashlittle(p[0 .. nl-4], 13),  hashlittle(p[0 .. nl-5], 13),
+             hashlittle(p[0 .. nl-6], 13),  hashlittle(p[0 .. nl-6], 13),
+             hashlittle(p[0 .. nl-8], 13),  hashlittle(p[0 .. nl-9], 13),
+             hashlittle(p[0 .. nl-10], 13), hashlittle(p[0 .. nl-11], 13));
         p = &qqq[2];
         writefln("%.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x",
-             hashlittle(p[0 .. q.length-1], 13), hashlittle(p[0 .. q.length-2], 13),
-             hashlittle(p[0 .. q.length-3], 13), hashlittle(p[0 .. q.length-4], 13),
-             hashlittle(p[0 .. q.length-5], 13), hashlittle(p[0 .. q.length-6], 13),
-             hashlittle(p[0 .. q.length-7], 13), hashlittle(p[0 .. q.length-8], 13),
-             hashlittle(p[0 .. q.length-9], 13), hashlittle(p[0 .. q.length-10], 13),
-             hashlittle(p[0 .. q.length-11], 13), hashlittle(p[0 .. q.length-12], 13));
+             hashlittle(p[0 .. nl  ], 13),  hashlittle(p[0 .. nl-1], 13),
+             hashlittle(p[0 .. nl-2], 13),  hashlittle(p[0 .. nl-3], 13),
+             hashlittle(p[0 .. nl-4], 13),  hashlittle(p[0 .. nl-5], 13),
+             hashlittle(p[0 .. nl-6], 13),  hashlittle(p[0 .. nl-6], 13),
+             hashlittle(p[0 .. nl-8], 13),  hashlittle(p[0 .. nl-9], 13),
+             hashlittle(p[0 .. nl-10], 13), hashlittle(p[0 .. nl-11], 13));
         p = &qqqq[3];
         writefln("%.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x",
-             hashlittle(p[0 .. q.length-1], 13), hashlittle(p[0 .. q.length-2], 13),
-             hashlittle(p[0 .. q.length-3], 13), hashlittle(p[0 .. q.length-4], 13),
-             hashlittle(p[0 .. q.length-5], 13), hashlittle(p[0 .. q.length-6], 13),
-             hashlittle(p[0 .. q.length-7], 13), hashlittle(p[0 .. q.length-8], 13),
-             hashlittle(p[0 .. q.length-9], 13), hashlittle(p[0 .. q.length-10], 13),
-             hashlittle(p[0 .. q.length-11], 13), hashlittle(p[0 .. q.length-12], 13));
+             hashlittle(p[0 .. nl  ], 13),  hashlittle(p[0 .. nl-1], 13),
+             hashlittle(p[0 .. nl-2], 13),  hashlittle(p[0 .. nl-3], 13),
+             hashlittle(p[0 .. nl-4], 13),  hashlittle(p[0 .. nl-5], 13),
+             hashlittle(p[0 .. nl-6], 13),  hashlittle(p[0 .. nl-6], 13),
+             hashlittle(p[0 .. nl-8], 13),  hashlittle(p[0 .. nl-9], 13),
+             hashlittle(p[0 .. nl-10], 13), hashlittle(p[0 .. nl-11], 13));
         writeln;
     
         /* check that hashlittle2 and hashlittle produce the same results */
@@ -1145,21 +1146,21 @@ version(unittest)
     {
         uint b,c;
         b=0, c=0, hashlittle2(cast(ubyte[])"", c, b);
-        writefln("hash is %.8s %.8s", c, b);   /* deadbeef deadbeef */
+        writefln("hash is %.8x %.8x", c, b);   /* deadbeef deadbeef */
         b=0xdeadbeef, c=0, hashlittle2(cast(ubyte[])"", c, b);
-        writefln("hash is %.8s %.8s", c, b);   /* bd5b7dde deadbeef */
+        writefln("hash is %.8x %.8x", c, b);   /* bd5b7dde deadbeef */
         b=0xdeadbeef, c=0xdeadbeef, hashlittle2(cast(ubyte[])"", c, b);
-        writefln("hash is %.8s %.8s", c, b);   /* 9c093ccd bd5b7dde */
+        writefln("hash is %.8x %.8x", c, b);   /* 9c093ccd bd5b7dde */
         b=0, c=0, hashlittle2(cast(ubyte[])"Four score and seven years ago", c, b);
-        writefln("hash is %.8s %.8s", c, b);   /* 17770551 ce7226e6 */
+        writefln("hash is %.8x %.8x", c, b);   /* 17770551 ce7226e6 */
         b=1, c=0, hashlittle2(cast(ubyte[])"Four score and seven years ago", c, b);
-        writefln("hash is %.8s %.8s", c, b);   /* e3607cae bd371de4 */
+        writefln("hash is %.8x %.8x", c, b);   /* e3607cae bd371de4 */
         b=0, c=1, hashlittle2(cast(ubyte[])"Four score and seven years ago", c, b);
-        writefln("hash is %.8s %.8s", c, b);   /* cd628161 6cbea4b3 */
+        writefln("hash is %.8x %.8x", c, b);   /* cd628161 6cbea4b3 */
         c = hashlittle(cast(ubyte[])"Four score and seven years ago", 0);
-        writefln("hash is %.8s", c);   /* 17770551 */
+        writefln("hash is %.8x", c);   /* 17770551 */
         c = hashlittle(cast(ubyte[])"Four score and seven years ago", 1);
-        writefln("hash is %.8s", c);   /* cd628161 */
+        writefln("hash is %.8x", c);   /* cd628161 */
     }
     
     
