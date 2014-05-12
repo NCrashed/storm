@@ -16,6 +16,12 @@ enum HASH_TABLE_SIZE_DEFAULT   = 0x00001000;
 /// Maximum acceptable hash table size
 enum HASH_TABLE_SIZE_MAX       = 0x00080000;  
 
+enum MPQ_HASH_TABLE_INDEX    = 0x000;
+enum MPQ_HASH_NAME_A         = 0x100;
+enum MPQ_HASH_NAME_B         = 0x200;
+enum MPQ_HASH_FILE_KEY       = 0x300;
+enum MPQ_HASH_KEY2_MIX       = 0x400;
+
 /// Hashing function
 alias HASH_STRING = uint function(string fileName, uint hashType);
 
@@ -24,7 +30,7 @@ auto HASH_INDEX_MASK(T)(T ha) { return ha.pHeader.dwHashTableSize ? (ha.pHeader.
 enum STORM_BUFFER_SIZE       = 0x500;
 
 /// Buffer for the decryption engine
-private uint[STORM_BUFFER_SIZE] StormBuffer;    
+package uint[STORM_BUFFER_SIZE] StormBuffer;    
 private bool  bMpqCryptographyInitialized = false;
 
 void InitializeMpqCryptography()

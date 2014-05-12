@@ -550,6 +550,8 @@ void FileStream_Close(TFileStream pStream)
 version(unittest)
 {
     import storm.mpq;
+    import storm.hashing;
+    import storm.encrypt;
     
     int FileStream_Test(string szFileName, uint dwStreamFlags)
     {
@@ -572,14 +574,14 @@ version(unittest)
         auto pHash = new TMPQHash[MpqHeader.dwHashTableSize];
         FilePos = MpqHeader.dwHashTablePos;
         FileStream_Read(pStream, &FilePos, cast(ubyte[])pHash);
-        DecryptMpqBlock(pHash, MpqHeader.dwHashTableSize * sizeof(TMPQHash), MPQ_KEY_HASH_TABLE);
+        DecryptMpqBlock(cast(uint[])pHash, MPQ_KEY_HASH_TABLE);
         pHash = null;
     
         // Read the block table
         auto pBlock = new TMPQBlock[MpqHeader.dwBlockTableSize];
         FilePos = MpqHeader.dwBlockTablePos;
         FileStream_Read(pStream, &FilePos, cast(ubyte[])pBlock);
-        DecryptMpqBlock(pBlock, MpqHeader.dwBlockTableSize * sizeof(TMPQBlock), MPQ_KEY_BLOCK_TABLE);
+        DecryptMpqBlock(cast(uint[])pBlock, MPQ_KEY_BLOCK_TABLE);
         pBlock = null;
 
         FileStream_Close(pStream);
