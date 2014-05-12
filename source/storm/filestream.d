@@ -2823,7 +2823,7 @@ T AllocateFileStream(T)(
     auto spl = szFileName.splitter('*').array;
     
     // Don't allow another master file in the string
-    if(spl.length > 3)
+    if(spl.length > 2)
     {
         SetLastError(ERROR_INVALID_PARAMETER);
         return null;
@@ -2831,10 +2831,10 @@ T AllocateFileStream(T)(
     // If we have a next file, we need to open it as master stream
     // Note that we don't care if the master stream exists or not,
     // If it doesn't, later attempts to read missing file block will fail
-    else if(spl.length == 3)
+    else if(spl.length == 2)
     {
         // Open the master file
-        pMaster = FileStream_OpenFile(spl[2], STREAM_FLAG_READ_ONLY);
+        pMaster = FileStream_OpenFile(spl[1], STREAM_FLAG_READ_ONLY);
     }
     
     // Allocate the stream structure for the given stream type
@@ -2856,7 +2856,7 @@ T AllocateFileStream(T)(
 // ensure of std behavior
 unittest
 {
-    assert(splitter("C:\archive.MPQ*http://www.server.com/MPQs/archive-server.MPQ", '*').equal(["C:\archive.MPQ", "", "http://www.server.com/MPQs/archive-server.MPQ"]));
+    assert(splitter("C:\archive.MPQ*http://www.server.com/MPQs/archive-server.MPQ", '*').equal(["C:\archive.MPQ", "http://www.server.com/MPQs/archive-server.MPQ"]));
     assert(splitter("C:\archive.MPQ", '*').equal(["C:\archive.MPQ"]));
 }
 
