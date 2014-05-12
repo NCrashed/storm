@@ -6,6 +6,7 @@
 module storm.hashing;
 
 import storm.common;
+import storm.jenkins.lookup;
 import tomcrypt.tomcrypt;
 
 /// Verified: If there is 1 file, hash table size is 4
@@ -164,7 +165,7 @@ ulong HashStringJenkins(string szFileName)
     // Thanks Quantam for finding out what the algorithm is.
     // I am really getting old for reversing large chunks of assembly
     // that does hashing :-)
-    hashlittle2(szLocFileName[0 .. nLength], secondary_hash, primary_hash);
+    hashlittle2(cast(ubyte[])szLocFileName[0 .. nLength], secondary_hash, primary_hash);
 
     // Combine those 2 together
     return cast(ulong)primary_hash * cast(ulong)0x100000000U + cast(ulong)secondary_hash;
