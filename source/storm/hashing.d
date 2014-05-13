@@ -28,6 +28,7 @@ alias HASH_STRING = uint function(string fileName, uint hashType);
 auto HASH_INDEX_MASK(T)(T ha) { return ha.pHeader.dwHashTableSize ? (ha.pHeader.dwHashTableSize - 1) : 0; }
 
 enum STORM_BUFFER_SIZE       = 0x500;
+enum MD5_DIGEST_SIZE         = 0x10;
 
 /// Buffer for the decryption engine
 package uint[STORM_BUFFER_SIZE] StormBuffer;    

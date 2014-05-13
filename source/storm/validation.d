@@ -8,6 +8,7 @@
 module storm.validation;
 
 import storm.mpq;
+import storm.hashing;
 import storm.constants;
 import tomcrypt.hash;
 import std.algorithm;

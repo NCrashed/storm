@@ -216,18 +216,24 @@ struct TMPQBlock
 }
 
 /// Patch file information, preceding the sector offset table
-struct TPatchInfo
+class TPatchInfo
 {
-    /// Length of patch info header, in bytes
-    uint dwLength;                             
-    /// Flags. 0x80000000 = MD5 (?)
-    uint dwFlags;                              
-    /// Uncompressed size of the patch file
-    uint dwDataSize;                           
-    /// MD5 of the entire patch file after decompression
-    ubyte[0x10] md5;                            
-
-    // Followed by the sector table (variable length)
+    static struct Data
+    {
+        /// Length of patch info header, in bytes
+        uint dwLength;                             
+        /// Flags. 0x80000000 = MD5 (?)
+        uint dwFlags;                              
+        /// Uncompressed size of the patch file
+        uint dwDataSize;                           
+        /// MD5 of the entire patch file after decompression
+        ubyte[0x10] md5;                            
+    }
+    Data data;
+    alias data this;
+    
+    /// Followed by the sector table (variable length)
+    ubyte[] pSectorTable;
 }
 
 /// Header for PTCH files 
@@ -557,7 +563,7 @@ class TMPQFile
     uint          cbFileData;                  
 
     /// Patch info block, preceding the sector table
-    TPatchInfo   * pPatchInfo;      // ?              
+    TPatchInfo    pPatchInfo;      // ?              
     /// Position of each file sector, relative to the begin of the file. Only for compressed files.
     uint[]        SectorOffsets;               
     /// Array of sector checksums (either ADLER32 or MD5) values for each file sector

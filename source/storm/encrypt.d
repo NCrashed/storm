@@ -66,10 +66,9 @@ void DecryptMpqBlock(uint[] dataBlock, uint dwKey1)
  *  (dwKey1 + dwKey2) = DataBlock[0] ^ dwDecrypted0;
  *
  */
-uint DetectFileKeyBySectorSize(uint[] EncryptedData, uint dwSectorSize, uint dwDecrypted0)
+uint DetectFileKeyBySectorSize(uint[] EncryptedData, uint dwSectorSize, size_t dwDecrypted0)
 {
-    uint dwDecrypted1Max = dwSectorSize + dwDecrypted0;
-    uint dwKey1PlusKey2;
+    size_t dwDecrypted1Max = dwSectorSize + dwDecrypted0;
     uint[2] DataBlock;
 
     // We must have at least 2 DWORDs there to be able to decrypt something
@@ -77,13 +76,13 @@ uint DetectFileKeyBySectorSize(uint[] EncryptedData, uint dwSectorSize, uint dwD
         return 0;
 
     // Get the value of the combined encryption key
-    dwKey1PlusKey2 = (EncryptedData[0] ^ dwDecrypted0) - 0xEEEEEEEE;
+    size_t dwKey1PlusKey2 = (EncryptedData[0] ^ dwDecrypted0) - 0xEEEEEEEE;
 
     // Try all 256 combinations of dwKey1
     for(uint i = 0; i < 0x100; i++)
     {
         uint dwSaveKey1;
-        uint dwKey1 = dwKey1PlusKey2 - StormBuffer[MPQ_HASH_KEY2_MIX + i];
+        uint dwKey1 = cast(uint)dwKey1PlusKey2 - StormBuffer[MPQ_HASH_KEY2_MIX + i];
         uint dwKey2 = 0xEEEEEEEE;
 
         // Modify the second key and decrypt the first uint

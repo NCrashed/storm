@@ -344,7 +344,6 @@ enum ERROR_STRONG_SIGNATURE_OK          = 4;
 /// There is a strong signature but sign check failed
 enum ERROR_STRONG_SIGNATURE_ERROR       = 5; 
                                            
-enum MD5_DIGEST_SIZE                   = 0x10;
 enum SHA1_DIGEST_SIZE                  = 0x14;  // 160 bits
 enum LANG_NEUTRAL                      = 0x00;  // Neutral locale
 
