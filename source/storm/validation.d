@@ -14,16 +14,16 @@ import std.algorithm;
 
 private enum ID_MPQ_FILE = 0x46494c45;
 
-TMPQArchive* IsValidMpqHandle(void* hMpq)
+TMPQArchive IsValidMpqHandle(void* hMpq)
 {
-    TMPQArchive * ha = cast(TMPQArchive *)hMpq;
+    auto ha = cast(TMPQArchive)hMpq;
     
     return (ha !is null && ha.pHeader !is null && ha.pHeader.dwID == ID_MPQ) ? ha : null;
 }
 
-TMPQFile* IsValidFileHandle(void* hFile)
+TMPQFile IsValidFileHandle(void* hFile)
 {
-    TMPQFile * hf = cast(TMPQFile *)hFile;
+    auto hf = cast(TMPQFile)hFile;
 
     // Must not be null
     if(hf !is null && hf.dwMagic == ID_MPQ_FILE)
@@ -33,7 +33,7 @@ TMPQFile* IsValidFileHandle(void* hFile)
             return hf;
 
         // Also verify the MPQ handle within the file handle
-        if(IsValidMpqHandle(hf.ha))
+        if(IsValidMpqHandle(cast(void*)hf.ha))
             return hf;
     }
 

@@ -156,7 +156,7 @@ align(1) struct TMPQHeader
 }
 
 /// Hash table entry. All files in the archive are searched by their hashes.
-struct TMPQHash
+class TMPQHash
 {
     /// The hash of the file path, using method A.
     uint dwName1;
@@ -271,7 +271,7 @@ enum SIZE_OF_XFRM_HEADER = 0x0C;
 *   This structure is combined from block table, hi-block table,
 *   (attributes) file and from (listfile).
 */
-struct TFileEntry
+class TFileEntry
 {
     /// Jenkins hash of the file name. Only used when the MPQ has BET table.
     ulong FileNameHash;                     
@@ -384,7 +384,7 @@ struct TMPQBetHeader
 }
 
 /// Structure for parsed HET table
-struct TMPQHetTable
+class TMPQHetTable
 {
     /// Bit array of FileIndex values
     BitArray   pBetIndexes;                    
@@ -454,10 +454,10 @@ struct TMPQBetTable
 }
 
 /// Archive handle structure
-struct TMPQArchive
+class TMPQArchive
 {
     /// Open stream for the MPQ
-    TFileStream* pStream;                     
+    TFileStream pStream;                     
 
     /// Position of user data (relative to the begin of the file)
     ulong      UserDataPos;                 
@@ -465,24 +465,24 @@ struct TMPQArchive
     ulong      MpqPos;                      
 
     /// Pointer to patch archive, if any
-    TMPQArchive* haPatch;              
+    TMPQArchive haPatch;              
     /// Pointer to base ("previous version") archive, if any
-    TMPQArchive* haBase;               
+    TMPQArchive haBase;               
     /// Prefix for file names in patch MPQs
     char[MPQ_PATCH_PREFIX_LEN] szPatchPrefix;   
     /// Length of the patch prefix, in characters
     size_t         cchPatchPrefix;              
 
     /// MPQ user data (NULL if not present in the file)
-    TMPQUserData * pUserData;                   
+    TMPQUserData * pUserData;       //?            
     /// MPQ file header
-    TMPQHeader   * pHeader;                     
+    TMPQHeader   * pHeader;         //?            
     /// Hash table
-    TMPQHash     * pHashTable;                  
+    TMPQHash[]     pHashTable;     
     /// HET table
-    TMPQHetTable * pHetTable;                   
+    TMPQHetTable[] pHetTable;                 
     /// File table
-    TFileEntry   * pFileTable;                  
+    TFileEntry[]   pFileTable;                  
     /// Hashing function that will convert the file name into hash
     HASH_STRING    pfnHashString;               
     
@@ -528,14 +528,14 @@ struct TMPQArchive
 }                                     
 
 /// File handle structure
-struct TMPQFile
+class TMPQFile
 {
     /// File stream. Only used on local files
-    TFileStream  * pStream;                     
+    TFileStream  pStream;                     
     /// Archive handle
-    TMPQArchive  * ha;                          
+    TMPQArchive    ha;                          
     /// File entry for the file
-    TFileEntry   * pFileEntry;                 
+    TFileEntry     pFileEntry;
     /// Decryption key 
     uint          dwFileKey;                   
     /// Current file position
@@ -548,16 +548,16 @@ struct TMPQFile
     uint          dwMagic;                     
 
     /// Pointer to opened patch file
-    TMPQFile * hfPatch;                 
+    TMPQFile   hfPatch;                 
     /// Patch header. Only used if the file is a patch file
-    TPatchHeader * pPatchHeader;                
+    TPatchHeader * pPatchHeader;             // ?   
     /// Loaded and patched file data. Only used if the file is a patch file
     ubyte[]       pbFileData;                 
     /// Size of loaded patched data 
     uint          cbFileData;                  
 
     /// Patch info block, preceding the sector table
-    TPatchInfo   * pPatchInfo;                 
+    TPatchInfo   * pPatchInfo;      // ?              
     /// Position of each file sector, relative to the begin of the file. Only for compressed files.
     uint[]        SectorOffsets;               
     /// Array of sector checksums (either ADLER32 or MD5) values for each file sector

@@ -13,10 +13,12 @@ import storm.hashing;
 import storm.constants;
 
 /// Attempts to search a free hash entry, or an entry whose names and locale matches
-TMPQHash* FindFreeHashEntry(TMPQArchive* ha, uint dwStartIndex, uint dwName1, uint dwName2, LCID lcLocale)
+TMPQHash FindFreeHashEntry(TMPQArchive ha, uint dwStartIndex, uint dwName1, uint dwName2, LCID lcLocale, out size_t foundIndex)
 {
-    TMPQHash * pDeletedEntry = null;            // If a deleted entry was found in the continuous hash range
-    TMPQHash * pFreeEntry = null;               // If a free entry was found in the continuous hash range
+    TMPQHash pDeletedEntry = null;            // If a deleted entry was found in the continuous hash range
+    size_t   deletedEntryIndex;
+    TMPQHash pFreeEntry = null;               // If a free entry was found in the continuous hash range
+    size_t   freeEntryIndex;
     uint dwHashIndexMask = HASH_INDEX_MASK(ha);
     uint dwIndex;
 
@@ -30,19 +32,26 @@ TMPQHash* FindFreeHashEntry(TMPQArchive* ha, uint dwStartIndex, uint dwName1, ui
     // 4) null
     while(true)
     {
-        TMPQHash * pHash = ha.pHashTable + dwIndex;
+        TMPQHash pHash = ha.pHashTable[dwIndex];
 
         // If we found a matching entry, return that one
         if(pHash.dwName1 == dwName1 && pHash.dwName2 == dwName2 && pHash.lcLocale == lcLocale)
+        {
+            foundIndex = dwIndex;
             return pHash;
-
+        }
+        
         // If we found a deleted entry, remember it but keep searching
         if(pHash.dwBlockIndex == HASH_ENTRY_DELETED && pDeletedEntry is null)
+        {
+            deletedEntryIndex = dwIndex;
             pDeletedEntry = pHash;
-
+        }
+        
         // If we found a free entry, we need to stop searching
         if(pHash.dwBlockIndex == HASH_ENTRY_FREE)
         {
+            freeEntryIndex = dwIndex;
             pFreeEntry = pHash;
             break;
         }
@@ -55,12 +64,21 @@ TMPQHash* FindFreeHashEntry(TMPQArchive* ha, uint dwStartIndex, uint dwName1, ui
     }
 
     // If we found a deleted entry, return that one preferentially
-    return (pDeletedEntry !is null) ? pDeletedEntry : pFreeEntry;
+    if(pDeletedEntry !is null)
+    {
+        foundIndex = deletedEntryIndex;
+        return pDeletedEntry;
+    }
+    else
+    {
+        foundIndex = freeEntryIndex;
+        return pFreeEntry;
+    }
 }
 
 /// Retrieves the first hash entry for the given file.
 /// Every locale version of a file has its own hash entry
-TMPQHash* GetFirstHashEntry(TMPQArchive* ha, string szFileName)
+TMPQHash GetFirstHashEntry(TMPQArchive ha, string szFileName)
 {
     uint dwHashIndexMask = HASH_INDEX_MASK(ha);
     uint dwStartIndex = ha.pfnHashString(szFileName, MPQ_HASH_TABLE_INDEX);
@@ -74,7 +92,7 @@ TMPQHash* GetFirstHashEntry(TMPQArchive* ha, string szFileName)
     // Search the hash table
     while(true)
     {
-        TMPQHash * pHash = ha.pHashTable + dwIndex;
+        TMPQHash pHash = ha.pHashTable[dwIndex];
 
         // If the entry matches, we found it.
         if(pHash.dwName1 == dwName1 && pHash.dwName2 == dwName2 && pHash.dwBlockIndex < ha.dwFileTableSize)
@@ -92,14 +110,14 @@ TMPQHash* GetFirstHashEntry(TMPQArchive* ha, string szFileName)
     }
 }
 
-TMPQHash* GetNextHashEntry(TMPQArchive* ha, TMPQHash* pFirstHash, TMPQHash* pHash)
+TMPQHash GetNextHashEntry(TMPQArchive ha, size_t dwStartIndex, size_t dwIndex)
 {
     uint dwHashIndexMask = HASH_INDEX_MASK(ha);
-    uint dwStartIndex = cast(uint)(pFirstHash - ha.pHashTable);
+    TMPQHash pFirstHash = ha.pHashTable[dwStartIndex];
+    TMPQHash pHash = ha.pHashTable[dwIndex];
     uint dwName1 = pHash.dwName1;
     uint dwName2 = pHash.dwName2;
-    uint dwIndex = cast(uint)(pHash - ha.pHashTable);
-
+    
     // Now go for any next entry that follows the pHash,
     // until either free hash entry was found, or the start entry was reached
     while(true)
@@ -109,7 +127,7 @@ TMPQHash* GetNextHashEntry(TMPQArchive* ha, TMPQHash* pFirstHash, TMPQHash* pHas
         dwIndex = (dwIndex + 1) & dwHashIndexMask;
         if(dwIndex == dwStartIndex)
             return null;
-        pHash = ha.pHashTable + dwIndex;
+        pHash = ha.pHashTable[dwIndex];
 
         // If the entry matches, we found it.
         if(pHash.dwName1 == dwName1 && pHash.dwName2 == dwName2 && pHash.dwBlockIndex < ha.pHeader.dwBlockTableSize)
@@ -122,17 +140,19 @@ TMPQHash* GetNextHashEntry(TMPQArchive* ha, TMPQHash* pFirstHash, TMPQHash* pHas
 }
 
 // Allocates an entry in the hash table
-TMPQHash* AllocateHashEntry(
-    TMPQArchive* ha,
-    TFileEntry* pFileEntry)
+TMPQHash AllocateHashEntry(
+    TMPQArchive ha,
+    size_t dwBlockIndex)
 {
-    TMPQHash* pHash;
+    TMPQHash pHash;
+    TFileEntry pFileEntry = ha.pFileTable[dwBlockIndex];
     uint dwStartIndex = ha.pfnHashString(pFileEntry.szFileName, MPQ_HASH_TABLE_INDEX);
     uint dwName1 = ha.pfnHashString(pFileEntry.szFileName, MPQ_HASH_NAME_A);
     uint dwName2 = ha.pfnHashString(pFileEntry.szFileName, MPQ_HASH_NAME_B);
 
     // Attempt to find a free hash entry
-    pHash = FindFreeHashEntry(ha, dwStartIndex, dwName1, dwName2, pFileEntry.lcLocale);
+    size_t hashIndex;
+    pHash = FindFreeHashEntry(ha, dwStartIndex, dwName1, dwName2, pFileEntry.lcLocale, hashIndex);
     if(pHash !is null)
     {
         // Fill the free hash entry
@@ -140,10 +160,10 @@ TMPQHash* AllocateHashEntry(
         pHash.dwName2      = dwName2;
         pHash.lcLocale     = pFileEntry.lcLocale;
         pHash.wPlatform    = pFileEntry.wPlatform;
-        pHash.dwBlockIndex = cast(uint)(pFileEntry - ha.pFileTable);
+        pHash.dwBlockIndex = cast(uint)dwBlockIndex;
 
         // Fill the hash index in the file entry
-        pFileEntry.dwHashIndex = cast(uint)(pHash - ha.pHashTable);
+        pFileEntry.dwHashIndex = cast(uint)hashIndex;
     }
 
     return pHash;
@@ -152,16 +172,14 @@ TMPQHash* AllocateHashEntry(
 /// Finds a free space in the MPQ where to store next data
 /// The free space begins beyond the file that is stored at the furthest
 /// position in the MPQ.
-ulong FindFreeMpqSpace(TMPQArchive* ha)
+ulong FindFreeMpqSpace(TMPQArchive ha)
 {
     TMPQHeader * pHeader = ha.pHeader;
-    TFileEntry * pFileTableEnd = ha.pFileTable + ha.dwFileTableSize;
-    TFileEntry * pFileEntry;
     ulong FreeSpacePos = ha.pHeader.dwHeaderSize;
     uint dwChunkCount;
 
     // Parse the entire block table
-    for(pFileEntry = ha.pFileTable; pFileEntry < pFileTableEnd; pFileEntry++)
+    foreach(pFileEntry; ha.pFileTable)
     {
         // Only take existing files with nonzero size
         if((pFileEntry.dwFlags & MPQ_FILE_EXISTS) && (pFileEntry.dwCmpSize != 0))
