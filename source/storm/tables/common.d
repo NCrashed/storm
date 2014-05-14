@@ -5,7 +5,7 @@
 *
 *   Hash table and block table manipulation
 */
-module storm.tables;
+module storm.tables.common;
 
 import storm.callback;
 import storm.mpq;

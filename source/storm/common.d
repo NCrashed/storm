@@ -14,6 +14,7 @@ import storm.filestream;
 import storm.encrypt;
 import storm.hashing;
 import storm.constants;
+import storm.tables.het;
 
 enum ID_MPQ_FILE            = 0x46494c45;
 

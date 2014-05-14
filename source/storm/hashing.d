@@ -15,6 +15,10 @@ enum HASH_TABLE_SIZE_MIN       = 0x00000004;
 enum HASH_TABLE_SIZE_DEFAULT   = 0x00001000;  
 /// Maximum acceptable hash table size
 enum HASH_TABLE_SIZE_MAX       = 0x00080000;  
+/// Block index for deleted entry in the hash table
+enum HASH_ENTRY_DELETED        = 0xFFFFFFFE;  
+/// Block index for free entry in the hash table
+enum HASH_ENTRY_FREE           = 0xFFFFFFFF;  
 
 enum MPQ_HASH_TABLE_INDEX    = 0x000;
 enum MPQ_HASH_NAME_A         = 0x100;
@@ -175,5 +179,5 @@ ulong HashStringJenkins(string szFileName)
     hashlittle2(cast(ubyte[])szLocFileName[0 .. nLength], secondary_hash, primary_hash);
 
     // Combine those 2 together
-    return cast(ulong)primary_hash * cast(ulong)0x100000000U + cast(ulong)secondary_hash;
+    return cast(ulong)primary_hash * 0x100000000UL + cast(ulong)secondary_hash;
 }

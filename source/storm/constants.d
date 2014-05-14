@@ -38,15 +38,6 @@ enum ERROR_FILE_INCOMPLETE          = 10006;
 enum ERROR_UNKNOWN_FILE_NAMES       = 10007;  
 
 // Values for SFileCreateArchive
-/// Block index for deleted entry in the hash table
-enum HASH_ENTRY_DELETED        = 0xFFFFFFFE;  
-/// Block index for free entry in the hash table
-enum HASH_ENTRY_FREE           = 0xFFFFFFFF;  
-
-/// NameHash1 value for a deleted entry
-enum HET_ENTRY_DELETED               = 0x80;  
-/// NameHash1 value for free entry
-enum HET_ENTRY_FREE                  = 0x00;  
 /// Size of LibTomCrypt's hash_state structure
 enum HASH_STATE_SIZE                 = 0x60;  
 /// Maximum length of the patch prefix
@@ -161,9 +152,7 @@ enum MPQ_WAVE_QUALITY_MEDIUM            = 1;
 /// Low quality, the best compression
 enum MPQ_WAVE_QUALITY_LOW               = 2; 
 
-// Signatures for HET and BET table
-/// 'HET\x1a'
-enum HET_TABLE_SIGNATURE       = 0x1A544548; 
+// Signatures for BET table
 /// 'BET\x1a'
 enum BET_TABLE_SIGNATURE       = 0x1A544542; 
 

@@ -321,27 +321,33 @@ struct TMPQExtHeader
 }
 
 /// Structure for HET table header
-struct TMPQHetHeader
+class TMPQHetHeader
 {
-    TMPQExtHeader ExtHdr;
-
-    /// Size of the entire HET table, including HET_TABLE_HEADER (in bytes)
-    uint dwTableSize;                      
-    /// Number of occupied entries in the HET table
-    uint dwEntryCount;                     
-    /// Total number of entries in the HET table
-    uint dwTotalCount;                     
-    /// Size of the name hash entry (in bits)
-    uint dwNameHashBitSize;                
-    /// Total size of file index (in bits)
-    uint dwIndexSizeTotal;                 
-    /// Extra bits in the file index
-    uint dwIndexSizeExtra;                 
-    /// Effective size of the file index (in bits)
-    uint dwIndexSize;                      
-    /// Size of the block index subtable (in bytes)
-    uint dwIndexTableSize;                 
-
+	struct Data
+	{
+	    TMPQExtHeader ExtHdr;
+	
+	    /// Size of the entire HET table, including HET_TABLE_HEADER (in bytes)
+	    uint dwTableSize;                      
+	    /// Number of occupied entries in the HET table
+	    uint dwEntryCount;                     
+	    /// Total number of entries in the HET table
+	    uint dwTotalCount;                     
+	    /// Size of the name hash entry (in bits)
+	    uint dwNameHashBitSize;                
+	    /// Total size of file index (in bits)
+	    uint dwIndexSizeTotal;                 
+	    /// Extra bits in the file index
+	    uint dwIndexSizeExtra;                 
+	    /// Effective size of the file index (in bits)
+	    uint dwIndexSize;                      
+	    /// Size of the block index subtable (in bytes)
+	    uint dwIndexTableSize;                 
+    }
+	Data data;
+	alias data this;
+	
+    ubyte[] pbSrcData;
 }
 
 /// Structure for BET table header
@@ -486,7 +492,7 @@ class TMPQArchive
     /// Hash table
     TMPQHash[]     pHashTable;     
     /// HET table
-    TMPQHetTable[] pHetTable;                 
+    TMPQHetTable   pHetTable;                 
     /// File table
     TFileEntry[]   pFileTable;                  
     /// Hashing function that will convert the file name into hash
