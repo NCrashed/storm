@@ -163,7 +163,7 @@ size_t compress_ZLIB(ubyte[] outBuffer, ubyte[] inBuffer, ref int pCmpType, int 
     return total_out;
 }
 
-bool Decompress_ZLIB(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
+bool decompress_ZLIB(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
 {
     z_stream z;                        // Stream information for zlib
     int nResult;
@@ -187,4 +187,118 @@ bool Decompress_ZLIB(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
         inflateEnd(&z);
     }
     return cast(bool)nResult;
+}
+
+/******************************************************************************/
+/*                                                                            */
+/*  Support functions for PKWARE Data Compression Library compression (0x08)  */
+/*                                                                            */
+/******************************************************************************/
+
+import storm.pklib.pklib;
+
+/// Function loads data from the input buffer. Used by Pklib's "implode"
+/// and "explode" function as user-defined callback
+/// Returns number of bytes loaded
+///    
+///   char[] buf          - Pointer to a buffer where to store loaded data
+///   void * param        - Custom pointer, parameter of implode/explode
+uint readInputData(ubyte * buf, uint * size, void * param)
+{
+    TDataInfo * pInfo = cast(TDataInfo *)param;
+    uint nMaxAvail = cast(uint)(pInfo.pbInBuffEnd - pInfo.pbInBuff);
+    uint nToRead = *size;
+
+    // Check the case when not enough data available
+    if(nToRead > nMaxAvail)
+        nToRead = nMaxAvail;
+    
+    // Load data and increment offsets
+    buf[0 .. nToRead] = pInfo.pbInBuff[0 .. nToRead];
+    pInfo.pbInBuff += nToRead;
+    assert(pInfo.pbInBuff <= pInfo.pbInBuffEnd);
+    return nToRead;
+}
+
+/// Function for store output data. Used by Pklib's "implode" and "explode"
+/// as user-defined callback
+///    
+///   char * buf          - Pointer to data to be written
+///   unsigned int * size - Number of bytes to write
+///   void * param        - Custom pointer, parameter of implode/explode
+void writeOutputData(ubyte * buf, uint * size, void * param)
+{
+    TDataInfo * pInfo = cast(TDataInfo *)param;
+    uint nMaxWrite = cast(uint)(pInfo.pbOutBuffEnd - pInfo.pbOutBuff);
+    uint nToWrite = *size;
+
+    // Check the case when not enough space in the output buffer
+    if(nToWrite > nMaxWrite)
+        nToWrite = nMaxWrite;
+
+    // Write output data and increments offsets
+    pInfo.pbOutBuff[0 .. nToWrite] = buf[0 .. nToWrite];
+    pInfo.pbOutBuff += nToWrite;
+    assert(pInfo.pbOutBuff <= pInfo.pbOutBuffEnd);
+}
+
+size_t compress_PKLIB(ubyte[] outBuffer, ubyte[] inBuffer, ref int pCmpType, int nCmpLevel)
+{
+    TDataInfo Info;                                      // Data information
+    auto work_buf = new ubyte[CMP_BUFFER_SIZE];          // Pklib's work buffer
+    uint dict_size;                                      // Dictionary size
+    uint ctype = CMP_BINARY;                             // Compression type
+
+
+    // Fill data information structure
+    Info.pbInBuff     = cast(ubyte*)inBuffer.ptr;
+    Info.pbInBuffEnd  = cast(ubyte*)&inBuffer[$];
+    Info.pbOutBuff    = cast(ubyte*)outBuffer.ptr;
+    Info.pbOutBuffEnd = cast(ubyte*)&outBuffer[$];
+
+    //
+    // Set the dictionary size
+    //
+    // Diablo I uses fixed dictionary size of CMP_IMPLODE_DICT_SIZE3
+    // Starcraft I uses the variable dictionary size based on algorithm below
+    //
+
+    if (inBuffer.length < 0x600)
+        dict_size = CMP_IMPLODE_DICT_SIZE1;
+    else if(0x600 <= inBuffer.length && inBuffer.length < 0xC00)
+        dict_size = CMP_IMPLODE_DICT_SIZE2;
+    else
+        dict_size = CMP_IMPLODE_DICT_SIZE3;
+
+    // Do the compression
+    if(implode(&readInputData, &writeOutputData, work_buf.ptr, &Info, &ctype, &dict_size) == CMP_NO_ERROR)
+        return cast(size_t)(Info.pbOutBuff - outBuffer.ptr);
+    return 0;
+}
+
+bool decompress_PKLIB(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
+{
+    TDataInfo Info;                             // Data information
+    auto work_buf = new ubyte[EXP_BUFFER_SIZE]; // Pklib's work buffer
+
+    // Handle no-memory condition
+    if(work_buf is null)
+        return 0;
+
+    // Fill data information structure
+    Info.pbInBuff     = cast(ubyte*)inBuffer.ptr;
+    Info.pbInBuffEnd  = cast(ubyte*)&inBuffer[$];
+    Info.pbOutBuff    = cast(ubyte*)outBuffer.ptr;
+    Info.pbOutBuffEnd = cast(ubyte*)&outBuffer[$];
+
+    // Do the decompression
+    explode(&readInputData, &writeOutputData, work_buf.ptr, &Info);
+    
+    // If PKLIB is unable to decompress the data, return 0;
+    if(Info.pbOutBuff == outBuffer.ptr)
+        return false;
+
+    // Give away the number of decompressed bytes
+    outLength = Info.pbOutBuff - outBuffer.ptr;
+    return true;
 }
