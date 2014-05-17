@@ -20,11 +20,11 @@
 module storm.compression;
 
 /* Public interface to port
-int    WINAPI SCompImplode    (void * pvOutBuffer, int * pcbOutBuffer, void * pvInBuffer, int cbInBuffer);
-int    WINAPI SCompExplode    (void * pvOutBuffer, int * pcbOutBuffer, void * pvInBuffer, int cbInBuffer);
-int    WINAPI SCompCompress   (void * pvOutBuffer, int * pcbOutBuffer, void * pvInBuffer, int cbInBuffer, unsigned uCompressionMask, int nCmpType, int nCmpLevel);
-int    WINAPI SCompDecompress (void * pvOutBuffer, int * pcbOutBuffer, void * pvInBuffer, int cbInBuffer);
-int    WINAPI SCompDecompress2(void * pvOutBuffer, int * pcbOutBuffer, void * pvInBuffer, int cbInBuffer);
+int    WINAPI SCompImplode    (void * pvOutBuffer, int * pcbOutBuffer, void * pvInBuffer, int inBuffer.length);
+int    WINAPI SCompExplode    (void * pvOutBuffer, int * pcbOutBuffer, void * pvInBuffer, int inBuffer.length);
+int    WINAPI SCompCompress   (void * pvOutBuffer, int * pcbOutBuffer, void * pvInBuffer, int inBuffer.length, unsigned uCompressionMask, int nCmpType, int nCmpLevel);
+int    WINAPI SCompDecompress (void * pvOutBuffer, int * pcbOutBuffer, void * pvInBuffer, int inBuffer.length);
+int    WINAPI SCompDecompress2(void * pvOutBuffer, int * pcbOutBuffer, void * pvInBuffer, int inBuffer.length);
 */
 
 private :
@@ -98,3 +98,93 @@ bool decompress_huff(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
     return outLength != 0;
 }
 
+/******************************************************************************/
+/*                                                                            */
+/*  Support for ZLIB compression (0x02)                                       */
+/*                                                                            */
+/******************************************************************************/
+
+import etc.c.zlib;
+
+size_t compress_ZLIB(ubyte[] outBuffer, ubyte[] inBuffer, ref int pCmpType, int nCmpLevel)
+{
+    z_stream z;                        // Stream information for zlib
+    int windowBits;
+    int nResult;
+
+    // Fill the stream structure for zlib
+    z.next_in   = cast(ubyte*)inBuffer.ptr;
+    z.avail_in  = cast(uint)inBuffer.length;
+    z.total_in  = inBuffer.length;
+    z.next_out  = cast(ubyte*)outBuffer.ptr;
+    z.avail_out = cast(uint)outBuffer.length;
+    z.total_out = 0;
+    z.zalloc    = null;
+    z.zfree     = null;
+
+    // Determine the proper window bits (WoW.exe build 12694)
+    if(inBuffer.length <= 0x100)
+        windowBits = 8;
+    else if(inBuffer.length <= 0x200)
+        windowBits = 9;
+    else if(inBuffer.length <= 0x400)
+        windowBits = 10;
+    else if(inBuffer.length <= 0x800)
+        windowBits = 11;
+    else if(inBuffer.length <= 0x1000)
+        windowBits = 12;
+    else if(inBuffer.length <= 0x2000)
+        windowBits = 13;
+    else if(inBuffer.length <= 0x4000)
+        windowBits = 14;
+    else
+        windowBits = 15;
+
+    // Initialize the compression.
+    // Storm.dll uses zlib version 1.1.3
+    // Wow.exe uses zlib version 1.2.3
+    nResult = deflateInit2(&z,
+                            6,                  // Compression level used by WoW MPQs
+                            Z_DEFLATED,
+                            windowBits,
+                            8,
+                            Z_DEFAULT_STRATEGY);
+    size_t total_out;
+    if(nResult == Z_OK)
+    {
+        // Call zlib to compress the data
+        nResult = deflate(&z, Z_FINISH);
+        
+        if(nResult == Z_OK || nResult == Z_STREAM_END)
+            total_out = z.total_out;
+            
+        deflateEnd(&z);
+    }
+    return total_out;
+}
+
+bool Decompress_ZLIB(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
+{
+    z_stream z;                        // Stream information for zlib
+    int nResult;
+
+    // Fill the stream structure for zlib
+    z.next_in   = cast(ubyte*)inBuffer.ptr;
+    z.avail_in  = cast(uint)inBuffer.length;
+    z.total_in  = inBuffer.length;
+    z.next_out  = cast(ubyte*)outBuffer.ptr;
+    z.avail_out = cast(uint)outBuffer.length;
+    z.total_out = 0;
+    z.zalloc    = null;
+    z.zfree     = null;
+
+    // Initialize the decompression structure. Storm.dll uses zlib version 1.1.3
+    if((nResult = inflateInit(&z)) == 0)
+    {
+        // Call zlib to decompress the data
+        nResult = inflate(&z, Z_FINISH);
+        outLength = z.total_out;
+        inflateEnd(&z);
+    }
+    return cast(bool)nResult;
+}
