@@ -41,9 +41,9 @@ void CreateHetHeader(
 
     // Calculate the total size needed for holding HET table
     pHetHeader.ExtHdr.dwDataSize =
-    pHetHeader.dwTableSize = TMPQHetHeader.sizeof - TMPQExtHeader.sizeof +
+    pHetHeader.dwTableSize = cast(uint)(TMPQHetHeader.sizeof - TMPQExtHeader.sizeof +
                               pHetHeader.dwTotalCount +
-                              pHetHeader.dwIndexTableSize;
+                              pHetHeader.dwIndexTableSize);
 }
 
 TMPQHetTable CreateHetTable(uint dwEntryCount, uint dwTotalCount, size_t dwNameHashBitSize, ubyte[] pbSrcData)
@@ -64,7 +64,7 @@ TMPQHetTable CreateHetTable(uint dwEntryCount, uint dwTotalCount, size_t dwNameH
     // Store the HET table parameters
     pHetTable.dwEntryCount        = dwEntryCount;
     pHetTable.dwTotalCount        = dwTotalCount;
-    pHetTable.dwNameHashBitSize   = dwNameHashBitSize;
+    pHetTable.dwNameHashBitSize   = cast(uint)dwNameHashBitSize;
     pHetTable.dwIndexSizeTotal    = GetNecessaryBitCount(dwEntryCount);
     pHetTable.dwIndexSizeExtra    = 0;
     pHetTable.dwIndexSize         = pHetTable.dwIndexSizeTotal;
