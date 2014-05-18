@@ -6,9 +6,10 @@
 	"authors": [
 		"ladislav-zezula",
 		"NCrashed <ncrashed@gmail.com>"],
-	"libs-posiz": ["z"],
+	"libs-posix": ["z"],
 	"dependencies": {
 	   "libtomcrypt": "~master",
-	   "bzip2": "~master"
+	   "bzip2": "~master",
+	   "liblzma": "~master"
 	}
 }
