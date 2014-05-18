@@ -302,3 +302,90 @@ bool decompress_PKLIB(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
     outLength = Info.pbOutBuff - outBuffer.ptr;
     return true;
 }
+
+/******************************************************************************/
+/*                                                                            */
+/*  Support for Bzip2 compression (0x10)                                      */
+/*                                                                            */
+/******************************************************************************/
+
+import bzlib;
+
+size_t compress_BZIP2(ubyte[] outBuffer, ubyte[] inBuffer, ref int pCmpType, int nCmpLevel)
+{
+    bz_stream strm;
+    int blockSize100k = 9;
+    int workFactor = 30;
+    int bzError;
+
+    // Initialize the BZIP2 compression
+    strm.bzalloc = null;
+    strm.bzfree  = null;
+
+    // Blizzard uses 9 as blockSize100k, (0x30 as workFactor)
+    // Last checked on Starcraft II
+    if(BZ2_bzCompressInit(&strm, blockSize100k, 0, workFactor) == BZ_OK)
+    {
+        strm.next_in   = inBuffer.ptr;
+        strm.avail_in  = cast(uint)inBuffer.length;
+        strm.next_out  = outBuffer.ptr;
+        strm.avail_out = cast(uint)outBuffer.length;
+
+        // Perform the compression
+        while(true)
+        {
+            bzError = BZ2_bzCompress(&strm, (strm.avail_in != 0) ? BZ_RUN : BZ_FINISH);
+            if(bzError == BZ_STREAM_END || bzError < 0)
+                break;
+        }
+
+        // Put the stream into idle state
+        BZ2_bzCompressEnd(&strm);
+
+        if(bzError > 0)
+            return strm.total_out_lo32;
+    }
+    return 0;
+}
+
+bool decompress_BZIP2(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
+{
+    bz_stream strm;
+    int nResult = BZ_OK;
+
+    // Initialize the BZIP2 decompression
+    strm.bzalloc = null;
+    strm.bzfree  = null;
+    if(BZ2_bzDecompressInit(&strm, 0, 0) == BZ_OK)
+    {
+        strm.next_in   = inBuffer.ptr;
+        strm.avail_in  = cast(uint)inBuffer.length;
+        strm.next_out  = outBuffer.ptr;
+        strm.avail_out = cast(uint)outBuffer.length;
+
+        // Perform the decompression
+        while(nResult != BZ_STREAM_END)
+        {
+            nResult = BZ2_bzDecompress(&strm);
+            
+            // If any error there, break the loop 
+            if(nResult < BZ_OK)
+                break;
+        }
+
+        // Put the stream into idle state
+        BZ2_bzDecompressEnd(&strm);
+
+        // If all succeeded, set the number of output bytes
+        if(nResult >= BZ_OK)
+        {
+            outLength = strm.total_out_lo32;
+            return true;
+        }
+    }
+
+    // Something failed, so set number of output bytes to zero
+    outLength = 0;
+    return false;
+}
+
