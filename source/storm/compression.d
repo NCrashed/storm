@@ -651,3 +651,23 @@ bool decompress_LZMA(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
     lzma_end(&strm);
     return true;
 }
+
+/******************************************************************************/
+/*                                                                            */
+/*  Support functions for SPARSE compression (0x20)                           */
+/*                                                                            */
+/******************************************************************************/
+
+import storm.sparse;
+
+size_t Compress_SPARSE(ubyte[] outBuffer, ubyte[] inBuffer, ref int pCmpType, int nCmpLevel)
+{
+    size_t length;
+    compressSparse(outBuffer, length, inBuffer);
+    return length;
+}
+
+bool Decompress_SPARSE(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
+{
+    return decompressSparse(outBuffer, outLength, inBuffer);
+}
