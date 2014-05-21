@@ -389,3 +389,265 @@ bool decompress_BZIP2(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
     return false;
 }
 
+/******************************************************************************/
+/*                                                                            */
+/*  Support functions for LZMA compression (0x12)                             */
+/*                                                                            */
+/******************************************************************************/
+
+import deimos.lzma;
+
+//extern(C) nothrow
+//{
+//    import core.memory;
+//    
+//    SRes LZMA_Callback_Progress(void* p, ulong inSize, ulong outSize)
+//    {
+//        return SZ_OK;
+//    }
+//    
+//    void* LZMA_Callback_Alloc(void* p, size_t size)
+//    {
+//        auto mem = GC.malloc(size);
+//        GC.addRoot(mem); // gc can delete buffer while processing in C side
+//        
+//        return mem;
+//    }
+//    
+//    /* address can be 0 */
+//    void LZMA_Callback_Free(void* p, void* address)
+//    {
+//        GC.free(address); // null == no action
+//    }
+//}
+
+//
+// Note: So far, I haven't seen any files compressed by LZMA.
+// This code haven't been verified against code ripped from Starcraft II Beta,
+// but we know that Starcraft LZMA decompression code is able to decompress
+// the data compressed by StormLib.
+//
+
+//size_t compress_LZMA(ubyte[] outBuffer, ubyte[] inBuffer, ref int pCmpType, int nCmpLevel)
+//{
+//    ICompressProgress Progress;
+//    CLzmaEncProps props;
+//    ISzAlloc SzAlloc;
+//
+//    ubyte[LZMA_PROPS_SIZE] encodedProps;
+//    size_t encodedPropsSize = LZMA_PROPS_SIZE;
+//    SRes nResult;
+//
+//    // Fill the callbacks in structures
+//    Progress.Progress = &LZMA_Callback_Progress;
+//    SzAlloc.Alloc = &LZMA_Callback_Alloc;
+//    SzAlloc.Free = &LZMA_Callback_Free;
+//
+//    // Initialize properties
+//    LzmaEncProps_Init(&props);
+//
+//    // Perform compression
+//    ubyte[] destBuffer = outBuffer[LZMA_HEADER_SIZE .. $];
+//    size_t  destLen = destBuffer.length;
+//    
+//    nResult = LzmaEncode(destBuffer.ptr,
+//                        &destLen,
+//                         inBuffer.ptr,
+//                         inBuffer.length,
+//                        &props,
+//                         encodedProps.ptr,
+//                        &encodedPropsSize,
+//                         0,
+//                        &Progress,
+//                        &SzAlloc,
+//                        &SzAlloc);
+//    if(nResult != SZ_OK)
+//        return 0;
+//
+//    // If we failed to compress the data
+//    if(destLen >= outBuffer.length)
+//        return 0;
+//
+//    // Write "useFilter" variable. Blizzard MPQ must not use filter.
+//    outBuffer[0] = 0;
+//    outBuffer = outBuffer[1 .. $];
+//    
+//    // Copy the encoded properties to the output buffer
+//    outBuffer[0 .. encodedPropsSize] = encodedProps[];
+//    pbOutBuffer += encodedPropsSize;
+//
+//    // Copy the size of the data
+//    outBuffer[0] = cast(ubyte)(inBuffer.length >> 0x00);
+//    outBuffer[1] = cast(ubyte)(inBuffer.length >> 0x08);
+//    outBuffer[2] = cast(ubyte)(inBuffer.length >> 0x10);
+//    outBuffer[3] = cast(ubyte)(inBuffer.length >> 0x18);
+//    outBuffer[4] = 0;
+//    outBuffer[5] = 0;
+//    outBuffer[6] = 0;
+//    outBuffer[7] = 0;
+//
+//    // Give the size of the data to the caller
+//    return destLen + LZMA_HEADER_SIZE;
+//}
+
+enum INTEGRITY_CHECK = lzma_check.LZMA_CHECK_CRC64;
+
+size_t compress_LZMA(ubyte[] outBuffer, ubyte[] inBuffer, ref int pCmpType, int nCmpLevel)
+{
+    lzma_check check = INTEGRITY_CHECK;
+    lzma_stream strm = lzma_stream.init;
+    lzma_ret ret;
+    size_t outLength;
+    
+    ret = lzma_easy_encoder(&strm, nCmpLevel, check);
+    if(ret != lzma_ret.LZMA_OK)
+    {
+        return 0;
+    }
+    
+    strm.next_in = inBuffer.ptr;
+    strm.avail_in = inBuffer.length;
+    
+    // loop until there's no pending compressed output
+    do
+    {
+        strm.next_out = outBuffer.ptr;
+        strm.avail_out = outBuffer.length;
+        
+        ret = lzma_code(&strm, lzma_action.LZMA_FINISH);
+        
+        if ((ret != lzma_ret.LZMA_OK) && (ret != lzma_ret.LZMA_STREAM_END))
+        {
+            lzma_end(&strm);
+            return 0;
+        }
+        else
+        {
+            outLength += outBuffer.length - strm.avail_out;
+            outBuffer = outBuffer[outBuffer.length - strm.avail_out .. $];
+        }
+    }
+    while(strm.avail_out == 0);
+    
+    lzma_end(&strm);
+    return outLength;
+}
+
+//bool decompress_LZMA(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
+//{
+//    ELzmaStatus LzmaStatus;
+//    ISzAlloc SzAlloc;
+//    SRes nResult;
+//
+//    // There must be at least 0x0E bytes in the buffer
+//    if(inBuffer.length <= LZMA_HEADER_SIZE) 
+//        return false;
+//
+//    // We only accept blocks that have no filter used
+//    if(outBuffer[0] != 0)
+//        return false;
+//
+//    // Fill the callbacks in structures
+//    SzAlloc.Alloc = &LZMA_Callback_Alloc;
+//    SzAlloc.Free = &LZMA_Callback_Free;
+//
+//    // Perform compression
+//    outLength = outBuffer.length;
+//    srcLen = cbInBuffer - LZMA_HEADER_SIZE;
+//    nResult = LzmaDecode(outBuffer.ptr,
+//                        &outLength,
+//                         inBuffer[LZMA_HEADER_SIZE ..  $].ptr,
+//                        &srcLen,
+//                         inBuffer[1 .. $].ptr, 
+//                         LZMA_PROPS_SIZE,
+//                         LZMA_FINISH_END,
+//                        &LzmaStatus,
+//                        &SzAlloc);
+//    if(nResult != SZ_OK)
+//        return false;
+//
+//    return true;
+//}
+//
+//bool decompress_LZMA_MPK(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
+//{
+//    ELzmaStatus LzmaStatus;
+//    ISzAlloc SzAlloc;
+//
+//    SRes nResult;
+//    immutable ubyte[] LZMA_Props = [0x5D, 0x00, 0x00, 0x00, 0x01];
+//
+//    // There must be at least 0x0E bytes in the buffer
+//    if(srcLen <= LZMA_Props.length)
+//        return false;
+//
+//    // Verify the props header
+//    if(inBuffer[0 .. LZMA_Props.length] != LZMA_Props[])
+//        return false;
+//
+//    // Fill the callbacks in structures
+//    SzAlloc.Alloc = &LZMA_Callback_Alloc;
+//    SzAlloc.Free = &LZMA_Callback_Free;
+//
+//    // Perform compression
+//    size_t srcLen = inBuffer.length - LZMA_Props.length;
+//    outLength = outBuffer.length;
+//    nResult = LzmaDecode(outBuffer.ptr,
+//                        &outLength,
+//                         srcBuffer[LZMA_Props.length .. $],
+//                        &srcLen,
+//                         srcBuffer.ptr, 
+//                         LZMA_Props.length,
+//                         LZMA_FINISH_END,
+//                        &LzmaStatus,
+//                        &SzAlloc);
+//    if(nResult != SZ_OK)
+//        return 0;
+//
+//    return true;
+//}
+
+bool decompress_LZMA(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
+{
+    lzma_stream strm = lzma_stream.init; /* alloc and init lzma_stream struct */
+    uint flags = LZMA_TELL_UNSUPPORTED_CHECK;
+    ulong memory_limit = ulong.max; /* no memory limit */
+
+    bool out_finished = false;
+    lzma_ret ret;
+    
+    /* initialize xz decoder */
+    ret = lzma_stream_decoder (&strm, memory_limit, flags);
+    if (ret != lzma_ret.LZMA_OK)
+    {
+        return false;
+    }
+
+    strm.next_in = inBuffer.ptr;
+    strm.avail_in = inBuffer.length;
+
+    /* loop until there's no pending decompressed output */
+    do
+    {
+        /* out_buf is clean at this point */
+        strm.next_out = outBuffer.ptr;
+        strm.avail_out = outBuffer.length;
+
+        /* decompress data */
+        ret = lzma_code (&strm, lzma_action.LZMA_FINISH);
+
+        if ((ret != lzma_ret.LZMA_OK) && (ret != lzma_ret.LZMA_STREAM_END))
+        {
+            return false;
+        }
+        else
+        {
+            outLength += outBuffer.length - strm.avail_out;
+            outBuffer = outBuffer[outBuffer.length - strm.avail_out .. $];
+        }
+    }
+    while (strm.avail_out == 0);
+
+    lzma_end(&strm);
+    return true;
+}
