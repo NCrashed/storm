@@ -660,14 +660,84 @@ bool decompress_LZMA(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
 
 import storm.sparse;
 
-size_t Compress_SPARSE(ubyte[] outBuffer, ubyte[] inBuffer, ref int pCmpType, int nCmpLevel)
+size_t compress_SPARSE(ubyte[] outBuffer, ubyte[] inBuffer, ref int pCmpType, int nCmpLevel)
 {
     size_t length;
     compressSparse(outBuffer, length, inBuffer);
     return length;
 }
 
-bool Decompress_SPARSE(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
+bool decompress_SPARSE(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
 {
     return decompressSparse(outBuffer, outLength, inBuffer);
+}
+
+/******************************************************************************/
+/*                                                                            */
+/*  Support for ADPCM mono compression (0x40)                                 */
+/*                                                                            */
+/******************************************************************************/
+
+import storm.adpcm;
+
+size_t compress_ADPCM_mono(ubyte[] outBuffer, ubyte[] inBuffer, ref int pCmpType, int nCmpLevel)
+{
+    // Prepare the compression level for Huffmann compression,
+    // which will be called as next step
+    if(0 < nCmpLevel && nCmpLevel <= 2)
+    {
+        nCmpLevel = 4;
+        pCmpType = 6;
+    }
+    else if(nCmpLevel == 3)
+    {
+        nCmpLevel = 6;
+        pCmpType = 8;
+    }
+    else
+    {
+        nCmpLevel = 5;
+        pCmpType = 7;
+    }
+    return compressADPCM(outBuffer, inBuffer, 1, nCmpLevel);
+}
+
+bool decompress_ADPCM_mono(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
+{
+    outLength = decompressADPCM(outBuffer, inBuffer, 1);
+    return true;
+}
+
+/******************************************************************************/
+/*                                                                            */
+/*  Support for ADPCM stereo compression (0x80)                               */
+/*                                                                            */
+/******************************************************************************/
+
+size_t compress_ADPCM_stereo(ubyte[] outBuffer, ubyte[] inBuffer, ref int pCmpType, int nCmpLevel)
+{
+    // Prepare the compression level for Huffmann compression,
+    // which will be called as next step
+    if(0 < nCmpLevel && nCmpLevel <= 2)
+    {
+        nCmpLevel = 4;
+        pCmpType = 6;
+    }
+    else if(nCmpLevel == 3)
+    {
+        nCmpLevel = 6;
+        pCmpType = 8;
+    }
+    else
+    {
+        nCmpLevel = 5;
+        pCmpType = 7;
+    }
+    return compressADPCM(outBuffer, inBuffer, 2, nCmpLevel);
+}
+
+bool decompress_ADPCM_stereo(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
+{
+    outLength = decompressADPCM(outBuffer, inBuffer, 2);
+    return true;
 }
