@@ -15,6 +15,7 @@ import storm.encrypt;
 import storm.hashing;
 import storm.constants;
 import storm.tables.het;
+import storm.compression;
 
 enum ID_MPQ_FILE            = 0x46494c45;
 
@@ -589,7 +590,7 @@ int WriteSectorChecksums(TMPQFile hf)
     ubyte[] pbCompressed;
     size_t dwCompressedSize = 0;
     size_t dwCrcSize;
-    int nOutSize;
+    size_t nOutSize;
     int nError = ERROR_SUCCESS;
 
     // The caller must make sure that this function is only called
@@ -616,8 +617,8 @@ int WriteSectorChecksums(TMPQFile hf)
     BSWAP_ARRAY32_UNSIGNED(cast(ubyte[])hf.SectorChksums);
 
     nOutSize = cast(int)dwCrcSize;
-    SCompCompress(pbCompressed, nOutSize, hf.SectorChksums, MPQ_COMPRESSION_ZLIB, 0, 0);
-    dwCompressedSize = cast(size_t)nOutSize;
+    SCompCompress(pbCompressed, nOutSize, cast(ubyte[])hf.SectorChksums, MPQ_COMPRESSION_ZLIB, 0, 0);
+    dwCompressedSize = nOutSize;
 
     // Write the sector CRCs to the archive
     RawFilePos = hf.RawFilePos + hf.SectorOffsets[hf.dwSectorCount];

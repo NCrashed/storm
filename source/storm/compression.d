@@ -29,6 +29,26 @@ int    WINAPI SCompDecompress (void * pvOutBuffer, int * pcbOutBuffer, void * pv
 int    WINAPI SCompDecompress2(void * pvOutBuffer, int * pcbOutBuffer, void * pvInBuffer, int inBuffer.length);
 */
 
+// Compression types for multiple compressions
+/// Huffmann compression (used on WAVE files only)
+enum MPQ_COMPRESSION_HUFFMANN       = 0x01;  
+/// ZLIB compression
+enum MPQ_COMPRESSION_ZLIB           = 0x02;  
+/// PKWARE DCL compression
+enum MPQ_COMPRESSION_PKWARE         = 0x08; 
+/// BZIP2 compression (added in Warcraft III) 
+enum MPQ_COMPRESSION_BZIP2          = 0x10;
+/// Sparse compression (added in Starcraft 2)
+enum MPQ_COMPRESSION_SPARSE         = 0x20;
+/// IMA ADPCM compression (mono)
+enum MPQ_COMPRESSION_ADPCM_MONO     = 0x40; 
+/// IMA ADPCM compression (stereo)
+enum MPQ_COMPRESSION_ADPCM_STEREO   = 0x80;  
+/// LZMA compression. Added in Starcraft 2. This value is NOT a combination of flags.
+enum MPQ_COMPRESSION_LZMA           = 0x12;  
+/// Same compression
+enum MPQ_COMPRESSION_NEXT_SAME      = 0xFFFFFFFF;
+
 bool SCompImplode(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
 {
     size_t cbOutBuffer;
@@ -87,6 +107,118 @@ bool SCompExplode(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
     return true;
 }
 
+bool SCompCompress(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer, uint uCompressionMask, int nCmpType, int nCmpLevel)
+{
+    COMPRESS[0x10] CompressFuncArray;               // Array of compression functions, applied sequentially
+    ubyte[0x10] CompressByte;                       // CompressByte for each method in the CompressFuncArray array
+    ubyte[] workBuffer;                             // Temporary storage for decompressed data
+    ubyte[] output = outBuffer;                     // Current output buffer
+    ubyte[] input = inBuffer;                       // Current input buffer
+    int nCompressCount = 0;
+    int nCompressIndex = 0;
+    int nAtLeastOneCompressionDone = 0;
+
+    // Check for valid parameters
+    if(outBuffer.length < inBuffer.length || outBuffer is null || inBuffer is null)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return false;
+    }
+
+    // Zero input length brings zero output length
+    if(inBuffer.length == 0)
+    {
+        outLength = 0;
+        return true;
+    }
+
+    // Setup the compression function array
+    if(uCompressionMask == MPQ_COMPRESSION_LZMA)
+    {
+        CompressFuncArray[0] = &compress_LZMA;
+        CompressByte[0] = cast(char)uCompressionMask;
+        nCompressCount = 1;
+    }
+    else
+    {
+        // Fill the compressions array
+        foreach(cmp_func; cmp_table)
+        {
+            // If the mask agrees, insert the compression function to the array
+            if(uCompressionMask & cmp_func.uMask)
+            {
+                CompressFuncArray[nCompressCount] = cmp_func.Compress;
+                CompressByte[nCompressCount] = cast(ubyte)cmp_func.uMask;
+                uCompressionMask &= ~cmp_func.uMask;
+                nCompressCount++;
+            }
+        }
+
+        // If at least one of the compressions remaing unknown, return an error
+        if(uCompressionMask != 0)
+        {
+            SetLastError(ERROR_NOT_SUPPORTED);
+            return false;
+        }
+    }
+
+    // If there is at least one compression, do it
+    if(nCompressCount > 0)
+    {
+        // If we need to do more than 1 compression, allocate intermediate buffer
+        if(nCompressCount > 1)
+        {
+            workBuffer = new ubyte[outBuffer.length];
+        }
+
+        // Get the current compression index
+        nCompressIndex = nCompressCount - 1;
+
+        // Perform all compressions in the array
+        for(int i = 0; i < nCompressCount; i++)
+        {
+            // Choose the proper output buffer
+            output = (nCompressIndex & 1) ? workBuffer : outBuffer;
+            nCompressIndex--;
+
+            // Perform the (next) compression
+            // Note that if the compression method is unable to compress the input data block
+            // by at least 2 bytes, we consider it as failure and will use source data instead
+            outLength = CompressFuncArray[i](output[1 .. $], input, nCmpType, nCmpLevel);
+
+            // If the compression failed, we copy the input buffer as-is.
+            // Note that there is one extra byte at the end of the intermediate buffer, so it should be OK
+            if(outLength > (inBuffer.length - 2))
+            {
+                output[nAtLeastOneCompressionDone .. $][0 .. input.length] = input[];
+                outLength = input.length;
+            }
+            else
+            {
+                // Remember that we have done at least one compression
+                nAtLeastOneCompressionDone = 1;
+                uCompressionMask |= CompressByte[i];
+            }
+
+            // Now point input buffer to the output buffer
+            input = output[nAtLeastOneCompressionDone .. $];
+        }
+
+        // If at least one compression succeeded, put the compression
+        // mask to the begin of the output buffer
+        if(nAtLeastOneCompressionDone)
+            outBuffer[0]  = cast(ubyte)uCompressionMask;
+        outLength += nAtLeastOneCompressionDone;
+    }
+    else
+    {
+        outBuffer[0 .. inBuffer.length] = inBuffer[];
+        outLength = inBuffer.length;
+    }
+
+    return true;
+}
+
 private :
 
 //-----------------------------------------------------------------------------
@@ -104,9 +236,8 @@ struct TDataInfo
 /// Prototype of the compression function
 /// Function doesn't return an error. A success means that the size of compressed buffer
 /// is lower than size of uncompressed buffer.
-alias void function(
+alias size_t function(
     ubyte[] outBuffer,                  // [out] Pointer to the buffer where the compressed data will be stored
-    out size_t cbOutBuffer,             // [out] Pointer to length of the buffer pointed by pvOutBuffer
     ubyte[] pvInBuffer,                 // [in]  Pointer to the buffer with data to compress
     ref int pCmpType,                   // [in]  Compression-method specific value. ADPCM Setups this for the following Huffman compression
     int nCmpLevel) COMPRESS;            // [in]  Compression specific value. ADPCM uses this. Should be set to zero.
@@ -132,6 +263,39 @@ struct TDecompressTable
     uint uMask;                         // Decompression bit
     DECOMPRESS    Decompress;           // Decompression function
 }
+
+/// This table contains compress functions which can be applied to
+/// uncompressed data. Each bit means the corresponding
+/// compression method/function must be applied.
+///
+///   WAVes compression            Data compression
+///   ------------------           -------------------
+///   1st sector   - 0x08          0x08 (D, HF, W2, SC, D2)
+///   Next sectors - 0x81          0x02 (W3)
+immutable TCompressTable[] cmp_table =
+[
+    TCompressTable(MPQ_COMPRESSION_SPARSE,       &compress_SPARSE),        // Sparse compression
+    TCompressTable(MPQ_COMPRESSION_ADPCM_MONO,   &compress_ADPCM_mono),    // IMA ADPCM mono compression
+    TCompressTable(MPQ_COMPRESSION_ADPCM_STEREO, &compress_ADPCM_stereo),  // IMA ADPCM stereo compression
+    TCompressTable(MPQ_COMPRESSION_HUFFMANN,     &compress_huff),          // Huffmann compression
+    TCompressTable(MPQ_COMPRESSION_ZLIB,         &compress_ZLIB),          // Compression with the "zlib" library
+    TCompressTable(MPQ_COMPRESSION_PKWARE,       &compress_PKLIB),         // Compression with Pkware DCL
+    TCompressTable(MPQ_COMPRESSION_BZIP2,        &compress_BZIP2)          // Compression Bzip2 library
+];
+
+/// This table contains decompress functions which can be applied to
+/// uncompressed data. The compression mask is stored in the first byte
+/// of compressed data
+immutable TDecompressTable[] dcmp_table =
+[
+    TDecompressTable(MPQ_COMPRESSION_BZIP2,        &decompress_BZIP2),        // Decompression with Bzip2 library
+    TDecompressTable(MPQ_COMPRESSION_PKWARE,       &decompress_PKLIB),        // Decompression with Pkware Data Compression Library
+    TDecompressTable(MPQ_COMPRESSION_ZLIB,         &decompress_ZLIB),         // Decompression with the "zlib" library
+    TDecompressTable(MPQ_COMPRESSION_HUFFMANN,     &decompress_huff),         // Huffmann decompression
+    TDecompressTable(MPQ_COMPRESSION_ADPCM_STEREO, &decompress_ADPCM_stereo), // IMA ADPCM stereo decompression
+    TDecompressTable(MPQ_COMPRESSION_ADPCM_MONO,   &decompress_ADPCM_mono),   // IMA ADPCM mono decompression
+    TDecompressTable(MPQ_COMPRESSION_SPARSE,       &decompress_SPARSE)        // Sparse decompression
+];
 
 /*****************************************************************************/
 /*                                                                           */
@@ -800,4 +964,16 @@ bool decompress_ADPCM_stereo(ubyte[] outBuffer, out size_t outLength, ubyte[] in
 {
     outLength = decompressADPCM(outBuffer, inBuffer, 2);
     return true;
+}
+
+/*****************************************************************************/
+/*                                                                           */
+/*   File decompression for MPK archives                                     */
+/*                                                                           */
+/*****************************************************************************/
+
+bool SCompDecompressMpk(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
+{
+    ///TODO: Check this MPK difference
+    return decompress_LZMA(outBuffer, outLength, inBuffer);    
 }

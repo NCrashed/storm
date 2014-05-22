@@ -124,26 +124,6 @@ enum MPQ_FILE_VALID_FLAGS    = (MPQ_FILE_IMPLODE       |
                                 MPQ_FILE_SECTOR_CRC    |  
                                 MPQ_FILE_EXISTS);
 
-// Compression types for multiple compressions
-/// Huffmann compression (used on WAVE files only)
-enum MPQ_COMPRESSION_HUFFMANN       = 0x01;  
-/// ZLIB compression
-enum MPQ_COMPRESSION_ZLIB           = 0x02;  
-/// PKWARE DCL compression
-enum MPQ_COMPRESSION_PKWARE         = 0x08; 
-/// BZIP2 compression (added in Warcraft III) 
-enum MPQ_COMPRESSION_BZIP2          = 0x10;
-/// Sparse compression (added in Starcraft 2)
-enum MPQ_COMPRESSION_SPARSE         = 0x20;
-/// IMA ADPCM compression (mono)
-enum MPQ_COMPRESSION_ADPCM_MONO     = 0x40; 
-/// IMA ADPCM compression (stereo)
-enum MPQ_COMPRESSION_ADPCM_STEREO   = 0x80;  
-/// LZMA compression. Added in Starcraft 2. This value is NOT a combination of flags.
-enum MPQ_COMPRESSION_LZMA           = 0x12;  
-/// Same compression
-enum MPQ_COMPRESSION_NEXT_SAME      = 0xFFFFFFFF;
-
 // Constants for SFileAddWave
 /// Best quality, the worst compression
 enum MPQ_WAVE_QUALITY_HIGH              = 0; 
