@@ -19,6 +19,8 @@
 /*****************************************************************************/
 module storm.compression;
 
+import storm.errors;
+
 /* Public interface to port
 int    WINAPI SCompImplode    (void * pvOutBuffer, int * pcbOutBuffer, void * pvInBuffer, int inBuffer.length);
 int    WINAPI SCompExplode    (void * pvOutBuffer, int * pcbOutBuffer, void * pvInBuffer, int inBuffer.length);
@@ -26,6 +28,64 @@ int    WINAPI SCompCompress   (void * pvOutBuffer, int * pcbOutBuffer, void * pv
 int    WINAPI SCompDecompress (void * pvOutBuffer, int * pcbOutBuffer, void * pvInBuffer, int inBuffer.length);
 int    WINAPI SCompDecompress2(void * pvOutBuffer, int * pcbOutBuffer, void * pvInBuffer, int inBuffer.length);
 */
+
+bool SCompImplode(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
+{
+    size_t cbOutBuffer;
+
+    // Check for valid parameters
+    if(outBuffer.length < inBuffer.length || outBuffer is null || inBuffer is null)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return false;
+    }
+
+    // Perform the compression
+    int unused;
+    cbOutBuffer = compress_PKLIB(outBuffer, inBuffer, unused, 0);
+
+    // If the compression was unsuccessful, copy the data as-is
+    if(cbOutBuffer >= outBuffer.length)
+    {
+        outBuffer[0 .. inBuffer.length] = inBuffer[];
+        cbOutBuffer = outBuffer.length;
+    }
+
+    outLength = cbOutBuffer;
+    return true;
+}
+
+bool SCompExplode(ubyte[] outBuffer, out size_t outLength, ubyte[] inBuffer)
+{
+    size_t cbOutBuffer;
+
+    // Check for valid parameters
+    if(outBuffer.length < inBuffer.length || outBuffer is null || inBuffer is null)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return false;
+    }
+
+    // If the input length is the same as output length, do nothing.
+    if(inBuffer.length == outBuffer.length)
+    {
+        // If the buffers are equal, don't copy anything.
+        if(inBuffer == outBuffer)
+            return true;
+
+        outBuffer[] = inBuffer[];
+        return 1;
+    }
+    
+    // Perform decompression
+    if(!decompress_PKLIB(outBuffer, outLength, inBuffer))
+    {
+        SetLastError(ERROR_FILE_CORRUPT);
+        return false;
+    }
+
+    return true;
+}
 
 private :
 
